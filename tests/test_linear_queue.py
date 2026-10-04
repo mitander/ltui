@@ -122,7 +122,31 @@ class LinearQueueTests(unittest.TestCase):
         self.assertEqual([r.id for r in rows], ["KAP-1", "KAP-2"])
         self.assertTrue(rows[1].prompt.plain.startswith(" ?"))
 
+    def test_focus_rows_keep_due_dates_and_update_time(self):
+        dated = issue("KAP-1", 1)
+        dated.update(
+            dueDate="2026-12-31",
+            updatedAt="2026-09-14T00:00:00Z",
+            priority=2,
+            labels={"nodes": []},
+            relations={"nodes": []},
+            inverseRelations={"nodes": []},
+        )
+        self.app._issue_row = lambda record, *args: ltui.LTUI._issue_row(
+            self.app, record, *args
+        )
+        row = self.render([dated])[0].prompt.plain
+        self.assertTrue(row.startswith(" 1  "))
+        self.assertIn(ltui.due_date_cell("2026-12-31"), row)
+        self.assertIn(ltui.rel_time(dated["updatedAt"]), row)
+
+        self.rows.content_size.width = ltui.DUE_COL_MIN_WIDTH
+        narrow_row = self.render([dated])[0].prompt.plain
+        self.assertNotIn("\uf133", narrow_row)
+        self.assertTrue(narrow_row.startswith(" 1  "))
+
     def test_query_and_keybinding(self):
+        self.assertIn("dueDate", ltui.ISSUE_FIELDS)
         self.assertIn("sortOrder", ltui.ISSUE_FIELDS)
         self.assertIn("pageInfo", ltui.QL_ISSUES)
         self.assertEqual(ltui.DEFAULT_KEYBINDS["toggle_focus"][0], ["f"])

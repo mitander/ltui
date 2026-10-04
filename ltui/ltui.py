@@ -1706,9 +1706,9 @@ class LTUI(App):
         width: 60; max-width: 90%; height: auto;
         background: $ltui-modal-bg; border: round $ltui-border-focus; padding: 1 2;
     }}
-    #duedate-title {{ color: {C_SUB}; text-style: bold; padding: 0 0 1 0; }}
-    #duedate-input {{ border: round {C_VFAINT}; background: transparent; }}
-    #duedate-input:focus {{ border: round {C_FAINT}; }}
+    #duedate-title {{ color: $tracker-sub; text-style: bold; padding: 0 0 1 0; }}
+    #duedate-input {{ border: round $tracker-vfaint; background: transparent; }}
+    #duedate-input:focus {{ border: round $tracker-faint; }}
     #duedate-presets {{ height: 3; margin: 1 0 0 0; }}
     /* a Button's default min-width is wider than a third of the box, and an fr
        child that cannot shrink to its share takes the whole row instead — which

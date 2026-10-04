@@ -61,6 +61,9 @@ class PersonalWorkflowTests(unittest.IsolatedAsyncioTestCase):
                             if app.theme == "flume-opal":
                                 break
                         self.assertEqual(app.theme, "flume-opal")
+                        if name == "ltui":
+                            app.push_screen(module.DueDateModal("KAP-1", None))
+                            await pilot.pause()
                         for schema in ("dusk", "opal", "mira", "mesa"):
                             app.theme = "flume-" + schema
                             await pilot.pause()
@@ -75,6 +78,25 @@ class PersonalWorkflowTests(unittest.IsolatedAsyncioTestCase):
                                 module.tracker_state_color({"type": "started"}),
                                 data["roles"]["status_started"],
                             )
+                            if name == "ltui":
+                                title = app.screen.query_one("#duedate-title")
+                                field = app.screen.query_one("#duedate-input")
+                                self.assertEqual(
+                                    title.styles.color,
+                                    module.TColor.parse(module.C_SUB),
+                                )
+                                self.assertEqual(
+                                    field.styles.border_top[1],
+                                    module.TColor.parse(module.C_FAINT),
+                                )
+                                app.screen.query_one("#duedate-save").focus()
+                                await pilot.pause()
+                                self.assertEqual(
+                                    field.styles.border_top[1],
+                                    module.TColor.parse(module.C_VFAINT),
+                                )
+                                field.focus()
+                                await pilot.pause()
                         app.theme = "mocha"
                         await pilot.pause()
                         self.assertEqual(module.C_TEXT, module._PALETTE["C_TEXT"])

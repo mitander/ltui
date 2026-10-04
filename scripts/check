@@ -14,4 +14,5 @@ nvim --headless --clean -l flume-theme/generate.lua
 "$python" -m py_compile flume-theme/flume_tracker_theme.py ltui/ltui.py jtui/jtui.py sctui/sctui.py
 "$python" -m unittest discover -s flume-theme/tests -v
 "$python" -m unittest discover -s tests -v
+"$python" -m unittest discover -s ltui/tests -v
 git diff --check
