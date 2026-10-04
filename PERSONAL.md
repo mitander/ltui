@@ -1,9 +1,11 @@
-# Personal Pantheon fork
+# Personal ltui fork
 
-This checkout maintains personal ltui and jtui customizations on upstream
-`runpantheon/ltui` revision `598c4039999e07b3dc03f4f199ccab8d63648dc5`.
+This checkout at `~/c/p/ltui` maintains personal ltui and jtui customizations
+on upstream `runpantheon/ltui` revision
+`59da9ba656a14e37989e98d3e18a9d948a3ae158`.
 The upstream README describes stock behavior. This file describes the fork.
-Shortcut is unchanged. Preserve upstream LICENSE, NOTICE, and attribution.
+Shortcut retains upstream behavior with local rendering refactors.
+Preserve upstream LICENSE, NOTICE, and attribution.
 
 ## Behavior
 
@@ -51,6 +53,38 @@ builds the adapter, generates themes from the current canonical palette source,
 and supplies both environment defaults. It does not deploy during validation.
 A remote source pin requires publishing this fork separately.
 
+## Maintain the fork
+
+`main` tracks `upstream/main` without personal changes. `flume-personal` carries
+the local commits. The `upstream` remote points to `runpantheon/ltui`; no personal
+`origin` remote is configured yet. Add `origin` when publishing your own fork.
+Do not push the personal branch to `upstream`.
+
+Update from a clean working tree:
+
+```sh
+git switch flume-personal
+git fetch upstream
+git branch backup/flume-personal-before-update
+git rebase upstream/main
+```
+
+Use a new backup branch name for subsequent updates. Resolve conflicts by
+preserving both upstream behavior and the personal behavior documented above.
+Use `git rebase --abort` to cancel an update. Compare the old and new commit
+series with `git range-diff`, then run the checks below before publishing.
+After validation, update the clean mirror with `git branch -f main upstream/main`.
+Refresh the dotfiles source hash as described in `dotfiles/tracker-tui/README.md`.
+
+Keep new commits focused on one behavior. Match surrounding code style and avoid
+unrelated formatting changes: they increase conflicts without adding behavior.
+Extract upstream contributions onto a separate branch based on `upstream/main`,
+without the Flume adapter or personal defaults. Complete queue pagination is a
+candidate because the upstream query otherwise truncates queues at 250 issues.
+
+Before submitting a PR, read `CONTRIBUTING.md`. Submission grants Pantheon the
+right to include the contribution in its commercial versions, in addition to GPL.
+
 ## Checks
 
 Use a Python environment with Textual, httpx, and watchfiles installed:
@@ -61,5 +95,6 @@ FLUME_RUNTIME=/absolute/path/to/flume.nvim PYTHON=/path/to/venv/bin/python ./scr
 
 The tests cover manual ordering, pagination failure, focus filters, milestone
 ordering, theme loading, atomic marker watching, repository hints, and native
-Textual theme/sidebar changes in both applications. Native tests stub credential
-loading and application startup; they do not contact tracker APIs.
+Textual theme/sidebar changes in both applications, plus upstream's due-date
+helpers, row layout, and modal layout. Native tests stub credential loading and
+application startup; they do not contact tracker APIs.

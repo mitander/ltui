@@ -1,3 +1,6 @@
+> Personal fork: see [PERSONAL.md](PERSONAL.md) for local behavior, installation,
+> validation, and upstream maintenance. The documentation below describes upstream.
+
 <div align="center">
 
 # ◐ ltui — the tracker TUI suite
