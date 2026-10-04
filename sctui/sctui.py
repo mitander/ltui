@@ -14,12 +14,12 @@ __version__ = "0.3.0"
 
 import json
 import sys
-import tomllib
 import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
+import tomllib
 from rich.markup import escape
 from rich.text import Text
 from textual import on, work
@@ -29,7 +29,15 @@ from textual.color import Color as TColor
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.theme import Theme
-from textual.widgets import Button, Footer, Input, Markdown, OptionList, Static, TextArea
+from textual.widgets import (
+    Button,
+    Footer,
+    Input,
+    Markdown,
+    OptionList,
+    Static,
+    TextArea,
+)
 from textual.widgets.option_list import Option
 from textual.worker import WorkerState
 
@@ -54,14 +62,30 @@ C_RED = "#f38ba8"
 C_MAUVE = "#cba6f7"
 
 _PALETTE = dict(
-    C_TEXT=C_TEXT, C_SUB=C_SUB, C_DIM=C_DIM, C_FAINT=C_FAINT, C_VFAINT=C_VFAINT,
-    C_BLUE=C_BLUE, C_LAV=C_LAV, C_PEACH=C_PEACH, C_GREEN=C_GREEN, C_RED=C_RED,
+    C_TEXT=C_TEXT,
+    C_SUB=C_SUB,
+    C_DIM=C_DIM,
+    C_FAINT=C_FAINT,
+    C_VFAINT=C_VFAINT,
+    C_BLUE=C_BLUE,
+    C_LAV=C_LAV,
+    C_PEACH=C_PEACH,
+    C_GREEN=C_GREEN,
+    C_RED=C_RED,
     C_MAUVE=C_MAUVE,
 )
 _PALETTE_ANSI = dict(
-    C_TEXT="default", C_SUB="white", C_DIM="bright_black", C_FAINT="bright_black",
-    C_VFAINT="bright_black", C_BLUE="blue", C_LAV="bright_blue", C_PEACH="yellow",
-    C_GREEN="green", C_RED="red", C_MAUVE="magenta",
+    C_TEXT="default",
+    C_SUB="white",
+    C_DIM="bright_black",
+    C_FAINT="bright_black",
+    C_VFAINT="bright_black",
+    C_BLUE="blue",
+    C_LAV="bright_blue",
+    C_PEACH="yellow",
+    C_GREEN="green",
+    C_RED="red",
+    C_MAUVE="magenta",
 )
 
 
@@ -69,17 +93,21 @@ def set_palette(ansi: bool) -> None:
     """Swap the chrome palette; `system` draws it in terminal ANSI colors."""
     globals().update(_PALETTE_ANSI if ansi else _PALETTE)
 
+
 # ── themes ────────────────────────────────────────────────────────────────
-_ACCENTS = dict(
-    success=C_GREEN, warning="#f9e2af", error=C_RED, dark=True
-)
+_ACCENTS = dict(success=C_GREEN, warning="#f9e2af", error=C_RED, dark=True)
 
 THEMES = [
     Theme(
         name="mocha",
-        primary=C_BLUE, secondary=C_MAUVE, accent="#f5c2e7",
-        background="#1e1e2e", surface="#313244", panel="#181825",
-        foreground=C_TEXT, **_ACCENTS,
+        primary=C_BLUE,
+        secondary=C_MAUVE,
+        accent="#f5c2e7",
+        background="#1e1e2e",
+        surface="#313244",
+        panel="#181825",
+        foreground=C_TEXT,
+        **_ACCENTS,
         variables={
             "sctui-border": "#45475a",
             "sctui-border-focus": C_BLUE,
@@ -97,9 +125,14 @@ THEMES = [
     ),
     Theme(
         name="void",
-        primary=C_BLUE, secondary=C_MAUVE, accent="#f5c2e7",
-        background="#000000", surface="#101018", panel="#070709",
-        foreground=C_TEXT, **_ACCENTS,
+        primary=C_BLUE,
+        secondary=C_MAUVE,
+        accent="#f5c2e7",
+        background="#000000",
+        surface="#101018",
+        panel="#070709",
+        foreground=C_TEXT,
+        **_ACCENTS,
         variables={
             "sctui-border": "#26262e",
             "sctui-border-focus": C_BLUE,
@@ -117,9 +150,14 @@ THEMES = [
     ),
     Theme(
         name="onyx",
-        primary="#9aa5b5", secondary="#7d8494", accent="#b8c0cc",
-        background="#0e0e11", surface="#1b1b20", panel="#131317",
-        foreground="#d4d6dd", **_ACCENTS,
+        primary="#9aa5b5",
+        secondary="#7d8494",
+        accent="#b8c0cc",
+        background="#0e0e11",
+        surface="#1b1b20",
+        panel="#131317",
+        foreground="#d4d6dd",
+        **_ACCENTS,
         variables={
             "sctui-border": "#33333c",
             "sctui-border-focus": "#9aa5b5",
@@ -139,9 +177,14 @@ THEMES = [
     # blur/transparency it has) shows through
     Theme(
         name="clear",
-        primary="#8a93a5", secondary="#6f7787", accent="#a9b1c0",
-        background="ansi_default", surface="ansi_default", panel="ansi_default",
-        foreground=C_TEXT, **_ACCENTS,
+        primary="#8a93a5",
+        secondary="#6f7787",
+        accent="#a9b1c0",
+        background="ansi_default",
+        surface="ansi_default",
+        panel="ansi_default",
+        foreground=C_TEXT,
+        **_ACCENTS,
         variables={
             "sctui-border": "#3c3f4a",
             "sctui-border-focus": "#8a93a5",
@@ -161,10 +204,17 @@ THEMES = [
     # alacritty theme becomes the sctui theme
     Theme(
         name="system",
-        primary="ansi_blue", secondary="ansi_magenta", accent="ansi_cyan",
-        background="ansi_default", surface="ansi_default", panel="ansi_default",
+        primary="ansi_blue",
+        secondary="ansi_magenta",
+        accent="ansi_cyan",
+        background="ansi_default",
+        surface="ansi_default",
+        panel="ansi_default",
         foreground="ansi_default",
-        success="ansi_green", warning="ansi_yellow", error="ansi_red", dark=True,
+        success="ansi_green",
+        warning="ansi_yellow",
+        error="ansi_red",
+        dark=True,
         variables={
             "sctui-border": "ansi_bright_black",
             "sctui-border-focus": "ansi_blue",
@@ -236,8 +286,12 @@ def slugify(text: str, limit: int = 48) -> str:
 def normalize_state(state: dict) -> dict:
     """A Shortcut workflow state -> renderer state dict."""
     stype = state.get("type", "unstarted")
-    mapped = {"backlog": "backlog", "unstarted": "unstarted",
-              "started": "started", "done": "completed"}.get(stype, "unstarted")
+    mapped = {
+        "backlog": "backlog",
+        "unstarted": "unstarted",
+        "started": "started",
+        "done": "completed",
+    }.get(stype, "unstarted")
     return {
         "id": str(state.get("id", "?")),
         "name": state.get("name", "Unknown"),
@@ -247,34 +301,47 @@ def normalize_state(state: dict) -> dict:
     }
 
 
-def normalize_story(s: dict, state_map: dict, epic_map: dict,
-                    member_map: dict, viewer_id: str | None) -> dict:
+def normalize_story(
+    s: dict, state_map: dict, epic_map: dict, member_map: dict, viewer_id: str | None
+) -> dict:
     sid = s.get("id")
     key = f"sc-{sid}"
     title = s.get("name") or ""
     # owners: prefer the viewer if they're one, else the first owner
     owners = s.get("owner_ids") or []
-    owner_id = viewer_id if viewer_id in owners else (owners[0] if owners else None)
+    if viewer_id in owners:
+        owner_id = viewer_id
+    elif owners:
+        owner_id = owners[0]
+    else:
+        owner_id = None
     assignee = None
     if owner_id:
         assignee = {
             "id": owner_id,
             "displayName": member_map.get(owner_id, {}).get("displayName", "?"),
         }
-    relations, inverse = [], []
+
+    relations = []
+    inverse = []
     for link in s.get("story_links") or []:
         if link.get("verb") != "blocks":
             continue
         if link.get("type") == "subject":
             relations.append(
-                {"type": "blocks",
-                 "relatedIssue": {"identifier": f"sc-{link.get('object_id')}"}}
+                {
+                    "type": "blocks",
+                    "relatedIssue": {"identifier": f"sc-{link.get('object_id')}"},
+                }
             )
         else:
             inverse.append(
-                {"type": "blocks",
-                 "issue": {"identifier": f"sc-{link.get('subject_id')}"}}
+                {
+                    "type": "blocks",
+                    "issue": {"identifier": f"sc-{link.get('subject_id')}"},
+                }
             )
+
     epic = None
     if s.get("epic_id") and s["epic_id"] in epic_map:
         epic = {
@@ -282,6 +349,7 @@ def normalize_story(s: dict, state_map: dict, epic_map: dict,
             "name": epic_map[s["epic_id"]],
             "color": label_color(epic_map[s["epic_id"]]),
         }
+
     mention = member_map.get(owner_id or "", {}).get("mention", "story")
     return {
         "id": str(sid),
@@ -291,18 +359,30 @@ def normalize_story(s: dict, state_map: dict, epic_map: dict,
         "url": s.get("app_url") or f"https://app.shortcut.com/story/{sid}",
         "priority": TYPE_PRIORITY.get(s.get("story_type", ""), 0),
         "branchName": f"{mention}/sc-{sid}/{slugify(title)}",
-        "updatedAt": s.get("updated_at") or s.get("created_at") or "1970-01-01T00:00:00Z",
+        "updatedAt": s.get("updated_at")
+        or s.get("created_at")
+        or "1970-01-01T00:00:00Z",
         "createdAt": s.get("created_at") or "1970-01-01T00:00:00Z",
         "state": state_map.get(
             s.get("workflow_state_id"),
-            {"id": "?", "name": "Unknown", "color": "#8993a4",
-             "type": "unstarted", "position": 1},
+            {
+                "id": "?",
+                "name": "Unknown",
+                "color": "#8993a4",
+                "type": "unstarted",
+                "position": 1,
+            },
         ),
         "assignee": assignee,
-        "labels": {"nodes": [
-            {"name": l.get("name", "?"), "color": l.get("color") or label_color(l.get("name", "?"))}
-            for l in s.get("labels") or []
-        ]},
+        "labels": {
+            "nodes": [
+                {
+                    "name": l.get("name", "?"),
+                    "color": l.get("color") or label_color(l.get("name", "?")),
+                }
+                for l in s.get("labels") or []
+            ]
+        },
         "relations": {"nodes": relations},
         "inverseRelations": {"nodes": inverse},
         "parent": None,
@@ -361,14 +441,20 @@ def build_bindings(user_keybinds: dict | None = None) -> list:
     """App bindings from defaults + config.json overrides. Fail-safe: a bad
     config falls back to the defaults for the affected action."""
     merged: dict[str, tuple[list, str | None]] = {}
-    user_keybinds = user_keybinds if user_keybinds is not None else (
-        USER_CONFIG.get("keybinds", {}) if isinstance(USER_CONFIG, dict) else {}
+    user_keybinds = (
+        user_keybinds
+        if user_keybinds is not None
+        else (USER_CONFIG.get("keybinds", {}) if isinstance(USER_CONFIG, dict) else {})
     )
     for action, (keys, label) in DEFAULT_KEYBINDS.items():
         custom = user_keybinds.get(action)
         if isinstance(custom, str):
             keys = [custom]
-        elif isinstance(custom, list) and all(isinstance(k, str) for k in custom) and custom:
+        elif (
+            isinstance(custom, list)
+            and all(isinstance(k, str) for k in custom)
+            and custom
+        ):
             keys = custom
         merged[action] = (keys, label)
     bindings = [Binding("escape", "back", show=False)]
@@ -920,7 +1006,10 @@ class ThemeModal(ModalScreen):
 
     def _row(self, name: str, active: str) -> Option:
         row = Text("  ")
-        row.append("\u25cf " if name == active else "\u25cb ", style=C_BLUE if name == active else C_DIM)
+        row.append(
+            "\u25cf " if name == active else "\u25cb ",
+            style=C_BLUE if name == active else C_DIM,
+        )
         row.append(name, style=C_TEXT if name == active else C_SUB)
         return Option(row, id=name)
 
@@ -1041,13 +1130,9 @@ class ProjectNameModal(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="projname-box"):
-            yield Static(
-                f"[bold {C_SUB}]\uf07b new epic[/]", id="projname-title"
-            )
+            yield Static(f"[bold {C_SUB}]\uf07b new epic[/]", id="projname-title")
             yield Input(placeholder="epic name", id="projname-input")
-            yield Static(
-                f"[{C_DIM}]enter creates · esc cancels[/]", id="projname-hint"
-            )
+            yield Static(f"[{C_DIM}]enter creates · esc cancels[/]", id="projname-hint")
 
     def on_mount(self) -> None:
         pop_in(self.query_one("#projname-box"))
@@ -1077,7 +1162,9 @@ class SettingsModal(ModalScreen):
         app = self.app
         profile = Text()
         profile.append(" ", style=C_BLUE)
-        profile.append(getattr(app, "_viewer_name", None) or "…", style=f"bold {C_TEXT}")
+        profile.append(
+            getattr(app, "_viewer_name", None) or "…", style=f"bold {C_TEXT}"
+        )
         org = getattr(app, "_org", None)
         if org:
             profile.append(f"  ·  {org}", style=C_DIM)
@@ -1134,41 +1221,53 @@ class HelpModal(ModalScreen):
     ]
 
     SECTIONS = [
-        ("navigate", [
-            ("ctrl+d / ctrl+u", "half page down / up"),
-            ("[ / ]", "previous / next group"),
-            (":", "command palette"),
-            ("j/k ↑↓", "move around lists and the detail panel"),
-            ("← / →", "switch panes — → on a ticket opens it"),
-            ("g / G", "jump to top / bottom"),
-            ("enter", "open ticket detail (click works too)"),
-            ("esc", "close panel · dismiss modal · clear filter"),
-        ]),
-        ("ticket", [
-            ("n", "new ticket in the current team"),
-            ("s", "change status"),
-            ("p", "change story type (bug/feature/chore)"),
-            ("l", "edit labels"),
-            ("P", "move to an epic (or create one)"),
-            ("a", "change assignee (or unassign)"),
-            ("c", "add a comment (ctrl+s to send)"),
-            ("y", "yank — copy branch / url / identifier"),
-            ("o", "open in browser"),
-        ]),
-        ("view", [
-            ("/", "filter issues"),
-            ("m", "toggle mine only"),
-            ("v", "group by status / epic"),
-            ("V", "filter to a single epic"),
-            ("t", "cycle theme"),
-            (",", "settings"),
-            ("r", "refresh"),
-        ]),
-        ("app", [
-            ("?", "this help"),
-            ("ctrl+p", "command palette"),
-            ("q", "quit"),
-        ]),
+        (
+            "navigate",
+            [
+                ("ctrl+d / ctrl+u", "half page down / up"),
+                ("[ / ]", "previous / next group"),
+                (":", "command palette"),
+                ("j/k ↑↓", "move around lists and the detail panel"),
+                ("← / →", "switch panes — → on a ticket opens it"),
+                ("g / G", "jump to top / bottom"),
+                ("enter", "open ticket detail (click works too)"),
+                ("esc", "close panel · dismiss modal · clear filter"),
+            ],
+        ),
+        (
+            "ticket",
+            [
+                ("n", "new ticket in the current team"),
+                ("s", "change status"),
+                ("p", "change story type (bug/feature/chore)"),
+                ("l", "edit labels"),
+                ("P", "move to an epic (or create one)"),
+                ("a", "change assignee (or unassign)"),
+                ("c", "add a comment (ctrl+s to send)"),
+                ("y", "yank — copy branch / url / identifier"),
+                ("o", "open in browser"),
+            ],
+        ),
+        (
+            "view",
+            [
+                ("/", "filter issues"),
+                ("m", "toggle mine only"),
+                ("v", "group by status / epic"),
+                ("V", "filter to a single epic"),
+                ("t", "cycle theme"),
+                (",", "settings"),
+                ("r", "refresh"),
+            ],
+        ),
+        (
+            "app",
+            [
+                ("?", "this help"),
+                ("ctrl+p", "command palette"),
+                ("q", "quit"),
+            ],
+        ),
     ]
 
     def compose(self) -> ComposeResult:
@@ -1556,6 +1655,7 @@ class SCTUI(App):
         try:
             token = load_token()
         except Exception:
+
             def connected(new_token: str | None) -> None:
                 if not new_token:
                     return
@@ -1643,11 +1743,14 @@ class SCTUI(App):
 
     async def fetch_issues(self, project_key: str) -> list[dict]:
         state_map, epic_map, member_map = await self._lookups()
-        stories = await self.api(
-            "POST",
-            "/api/v3/stories/search",
-            json={"group_id": project_key, "archived": False},
-        ) or []
+        stories = (
+            await self.api(
+                "POST",
+                "/api/v3/stories/search",
+                json={"group_id": project_key, "archived": False},
+            )
+            or []
+        )
         stories.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
         return [
             normalize_story(s, state_map, epic_map, member_map, self._viewer_id)
@@ -1692,16 +1795,19 @@ class SCTUI(App):
             data = {
                 "viewer": {
                     "id": me.get("id", ""),
-                    "displayName": me.get("name")
-                    or me.get("mention_name", "me"),
+                    "displayName": me.get("name") or me.get("mention_name", "me"),
                 },
-                "organization": {"name": me.get("workspace2", {}).get("url_slug", "shortcut")},
+                "organization": {
+                    "name": me.get("workspace2", {}).get("url_slug", "shortcut")
+                },
                 "teams": {
                     "nodes": [
                         {
                             "id": g["id"],
                             "name": g.get("name") or "team",
-                            "key": (g.get("mention_name") or g.get("name") or "team")[:8],
+                            "key": (g.get("mention_name") or g.get("name") or "team")[
+                                :8
+                            ],
                             "color": label_color(g.get("name") or "team"),
                         }
                         for g in groups
@@ -1723,7 +1829,9 @@ class SCTUI(App):
         )
         if team is None:
             issues_list.loading = False
-            self.notify("no teams found (sctui lists Shortcut Teams/groups)", severity="warning")
+            self.notify(
+                "no teams found (sctui lists Shortcut Teams/groups)", severity="warning"
+            )
             return
         self.query_one("#teams", NavList).highlighted = self._teams.index(team)
         self.load_team(team)
@@ -1821,8 +1929,7 @@ class SCTUI(App):
         if isinstance(self.screen, ModalScreen):
             return
         if any(
-            w.group == "mutate" and w.state == WorkerState.RUNNING
-            for w in self.workers
+            w.group == "mutate" and w.state == WorkerState.RUNNING for w in self.workers
         ):
             return
         self.load_team(self._team)
@@ -1847,7 +1954,8 @@ class SCTUI(App):
                     "identifier": "\uf00c" if t.get("complete") else "\u25cb",
                     "title": t.get("description") or "",
                     "state": {
-                        "id": "t", "name": "task",
+                        "id": "t",
+                        "name": "task",
                         "color": C_GREEN if t.get("complete") else C_SUB,
                         "type": "completed" if t.get("complete") else "unstarted",
                         "position": 1,
@@ -1901,8 +2009,7 @@ class SCTUI(App):
         children = (data["issue"].get("children") or {}).get("nodes") or []
         if children:
             done = sum(
-                1 for ch in children
-                if ch["state"]["type"] in ("completed", "canceled")
+                1 for ch in children if ch["state"]["type"] in ("completed", "canceled")
             )
             chead = Text("\uf0e8 ", style=C_MAUVE)
             chead.append(f"sub-issues · {done}/{len(children)}", style=f"bold {C_SUB}")
@@ -1928,9 +2035,11 @@ class SCTUI(App):
             await box.mount(Static(Text("   nothing here yet", style=C_DIM)))
             return
         for c in comments:
-            author = (c.get("user") or {}).get("displayName") or (
-                c.get("botActor") or {}
-            ).get("name") or "unknown"
+            author = (
+                (c.get("user") or {}).get("displayName")
+                or (c.get("botActor") or {}).get("name")
+                or "unknown"
+            )
             meta = Text()
             meta.append("● ", style=C_MAUVE)
             meta.append(author, style=f"bold {C_TEXT}")
@@ -2082,16 +2191,9 @@ class SCTUI(App):
             self.load_comments(issue)
 
     # ── rendering ─────────────────────────────────────────────────────
-    def render_issues(self, keep: str | None = None) -> None:
-        ol = self.query_one("#issues", NavList)
-        if keep is None:
-            prev = ol.highlighted
-            if prev is not None:
-                opt = ol.get_option_at_index(prev)
-                keep = opt.id if opt else None
-
-        width = max(ol.content_size.width - 2, 40)
-        flt = self._filter.lower()
+    def _visible_issues(self) -> list[dict]:
+        """Apply view filters without changing the cached issue records."""
+        filter_text = self._filter.lower()
         issues = self._issues
         if self._mine and self._viewer_id:
             issues = [
@@ -2105,23 +2207,29 @@ class SCTUI(App):
                 for i in issues
                 if (i.get("project") or {}).get("id", "") == self._project_filter
             ]
-        if flt:
+        if filter_text:
             issues = [
-                i
-                for i in issues
-                if flt
+                issue
+                for issue in issues
+                if filter_text
                 in (
-                    i["title"]
+                    issue["title"]
                     + " "
-                    + i["identifier"]
+                    + issue["identifier"]
                     + " "
-                    + ((i.get("assignee") or {}).get("displayName") or "")
+                    + ((issue.get("assignee") or {}).get("displayName") or "")
                 ).lower()
             ]
+        return issues
 
-        def mine_first(i: dict):
-            is_mine = (i.get("assignee") or {}).get("id") == self._viewer_id
-            return (0 if is_mine else 1, *issue_sort_key(i))
+    def _issue_groups(
+        self, issues: list[dict], width: int
+    ) -> list[tuple[Text, list[dict]]]:
+        """Build headers and ordered groups before replacing the displayed rows."""
+
+        def mine_first(issue: dict):
+            is_mine = (issue.get("assignee") or {}).get("id") == self._viewer_id
+            return (0 if is_mine else 1, *issue_sort_key(issue))
 
         if self._group_by == "project":
             # group by project; inside a project keep the status order,
@@ -2137,11 +2245,15 @@ class SCTUI(App):
                 proj_of.values(),
                 key=lambda p: (p["id"] == "", -len(by_proj[p["id"]])),
             )
+
             def in_group_key(i: dict):
                 return (state_sort_key(i["state"]), *mine_first(i))
+
             groups = [
-                (self._project_header_row(p, len(by_proj[p["id"]]), width),
-                 sorted(by_proj[p["id"]], key=in_group_key))
+                (
+                    self._project_header_row(p, len(by_proj[p["id"]]), width),
+                    sorted(by_proj[p["id"]], key=in_group_key),
+                )
                 for p in ordered_groups
             ]
         else:
@@ -2153,13 +2265,28 @@ class SCTUI(App):
                 state_of[sid] = i["state"]
             ordered_states = sorted(state_of.values(), key=state_sort_key)
             groups = [
-                (self._header_row(st, len(by_state[st["id"]]), width),
-                 sorted(by_state[st["id"]], key=mine_first))
+                (
+                    self._header_row(st, len(by_state[st["id"]]), width),
+                    sorted(by_state[st["id"]], key=mine_first),
+                )
                 for st in ordered_states
             ]
+        return groups
+
+    def render_issues(self, keep: str | None = None) -> None:
+        issues_list = self.query_one("#issues", NavList)
+        if keep is None:
+            previous_index = issues_list.highlighted
+            if previous_index is not None:
+                previous_option = issues_list.get_option_at_index(previous_index)
+                keep = previous_option.id if previous_option else None
+
+        width = max(issues_list.content_size.width - 2, 40)
+        issues = self._visible_issues()
+        groups = self._issue_groups(issues, width)
 
         id_w = max((len(i["identifier"]) for i in issues), default=6)
-        ol.clear_options()
+        issues_list.clear_options()
         self._opt_index = {}
         self._header_indices = []
         opts: list[Option] = []
@@ -2174,28 +2301,35 @@ class SCTUI(App):
                 self._opt_index[i["id"]] = len(opts)
                 opts.append(Option(self._issue_row(i, width, id_w), id=i["id"]))
         if not opts:
-            msg = "no matches" if flt else "no issues"
+            msg = "no matches" if self._filter.lower() else "no issues"
             opts.append(Option(Text(f"  {msg}", style=C_DIM), disabled=True))
-        ol.add_options(opts)
+        issues_list.add_options(opts)
 
         # a group's first issue sits right after its header row
         self._group_starts = [h + 1 for h in self._header_indices]
         mine_tag = " \uf007 mine \u00b7" if self._mine else ""
         proj_tag = ""
         if self._project_filter is not None:
-            pname = next(
-                ((i.get("project") or {}).get("name") for i in self._issues
-                 if (i.get("project") or {}).get("id", "") == self._project_filter),
-                "no epic",
-            ) or "no epic"
+            pname = (
+                next(
+                    (
+                        (i.get("project") or {}).get("name")
+                        for i in self._issues
+                        if (i.get("project") or {}).get("id", "")
+                        == self._project_filter
+                    ),
+                    "no epic",
+                )
+                or "no epic"
+            )
             proj_tag = f" \uf07b {pname} \u00b7"
-        self.query_one("#centre").border_subtitle = (
-            f"{mine_tag}{proj_tag} {len(issues)} issues "
-        )
+        self.query_one(
+            "#centre"
+        ).border_subtitle = f"{mine_tag}{proj_tag} {len(issues)} issues "
         if keep and keep in self._opt_index:
-            ol.highlighted = self._opt_index[keep]
+            issues_list.highlighted = self._opt_index[keep]
         elif self._opt_index:
-            ol.highlighted = min(self._opt_index.values())
+            issues_list.highlighted = min(self._opt_index.values())
 
     def _header_row(self, state: dict, count: int, width: int) -> Text:
         color = state["color"] or C_SUB
@@ -2401,9 +2535,9 @@ class SCTUI(App):
             self._spin_frame = (self._spin_frame + 1) % len(SPINNER_FRAMES)
             frame = SPINNER_FRAMES[self._spin_frame]
             try:
-                self.query_one("#centre").border_subtitle = (
-                    f" {len(self._issues)} \u00b7 {frame} refreshing "
-                )
+                self.query_one(
+                    "#centre"
+                ).border_subtitle = f" {len(self._issues)} \u00b7 {frame} refreshing "
             except Exception:
                 pass
 
@@ -2481,7 +2615,9 @@ class SCTUI(App):
         if self._project_filter is None:
             row.append("  \uf00c", style=C_GREEN)
         opts.append(Option(row, id="all:"))
-        for pid, p in sorted(projects.items(), key=lambda x: (x[0] == "", -counts[x[0]])):
+        for pid, p in sorted(
+            projects.items(), key=lambda x: (x[0] == "", -counts[x[0]])
+        ):
             row = Text()
             row.append("\uf07b ", style=p.get("color") or C_DIM)
             row.append(p["name"], style=C_TEXT)
@@ -2607,11 +2743,13 @@ class SCTUI(App):
         known = {o["id"] for o in options}
         for lb in issue["labels"]["nodes"]:
             if lb["name"] not in known:
-                options.append({
-                    "id": lb["name"],
-                    "name": lb["name"],
-                    "color": lb.get("color") or label_color(lb["name"]),
-                })
+                options.append(
+                    {
+                        "id": lb["name"],
+                        "name": lb["name"],
+                        "color": lb.get("color") or label_color(lb["name"]),
+                    }
+                )
         if not options:
             self.notify("this workspace has no labels yet", severity="warning")
             return
@@ -2637,12 +2775,12 @@ class SCTUI(App):
         except Exception as e:
             self.notify(f"update failed: {e}", severity="error")
             return
-        color_of = {
-            lb["name"]: lb["color"] for lb in self._workspace_labels or []
+        color_of = {lb["name"]: lb["color"] for lb in self._workspace_labels or []}
+        issue["labels"] = {
+            "nodes": [
+                {"name": n, "color": color_of.get(n) or label_color(n)} for n in names
+            ]
         }
-        issue["labels"] = {"nodes": [
-            {"name": n, "color": color_of.get(n) or label_color(n)} for n in names
-        ]}
         self._write_team_cache()
         self.render_issues(keep=issue["id"])
         if self._detail_issue and self._detail_issue["id"] == issue["id"]:
@@ -2698,9 +2836,11 @@ class SCTUI(App):
             if choice is None:
                 return
             if choice == "new:":
+
                 def named(name: str | None) -> None:
                     if name:
                         self.create_project_and_assign(issue, name)
+
                 self.push_screen(ProjectNameModal(), named)
             elif choice == "none:":
                 if current is not None:
@@ -2710,9 +2850,7 @@ class SCTUI(App):
                 if pid != current:
                     self.apply_project(issue, pid)
 
-        self.push_screen(
-            PickerModal(f"move {issue['identifier']} to…", opts), done
-        )
+        self.push_screen(PickerModal(f"move {issue['identifier']} to…", opts), done)
 
     @work(group="mutate")
     async def create_project_and_assign(self, issue: dict, name: str) -> None:
@@ -2749,9 +2887,7 @@ class SCTUI(App):
                 (p["name"] for p in self._workspace_epics or [] if p["id"] == epic_id),
                 f"epic {epic_id}",
             )
-            issue["project"] = {
-                "id": epic_id, "name": name, "color": label_color(name)
-            }
+            issue["project"] = {"id": epic_id, "name": name, "color": label_color(name)}
         self._write_team_cache()
         self.render_issues(keep=issue["id"])
         if self._detail_issue and self._detail_issue["id"] == issue["id"]:

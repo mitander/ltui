@@ -26,7 +26,9 @@ class LinearQueueTests(unittest.TestCase):
     def setUp(self):
         self.state = {}
         self.loader = patch.object(ltui, "load_state", lambda: self.state.copy())
-        self.saver = patch.object(ltui, "save_state", lambda data: self.state.update(data))
+        self.saver = patch.object(
+            ltui, "save_state", lambda data: self.state.update(data)
+        )
         self.loader.start()
         self.saver.start()
         self.addCleanup(self.loader.stop)
@@ -39,7 +41,9 @@ class LinearQueueTests(unittest.TestCase):
         self.rows.content_size = SimpleNamespace(width=100)
         self.centre = SimpleNamespace(border_subtitle="")
         self.app.query_one = Mock(
-            side_effect=lambda selector, *args: self.rows if selector == "#issues" else self.centre
+            side_effect=lambda selector, *args: (
+                self.rows if selector == "#issues" else self.centre
+            )
         )
         self.app._issue_row = lambda i, *args: ltui.Text(i["identifier"])
 
@@ -60,7 +64,9 @@ class LinearQueueTests(unittest.TestCase):
         rows = self.render(issues)
         self.assertTrue(self.app._focus)
         self.assertEqual([r.id for r in rows], ["KAP-5", "KAP-1", "KAP-2"])
-        self.assertEqual([r.prompt.plain for r in rows], ["    KAP-5", " 1  KAP-1", " 2  KAP-2"])
+        self.assertEqual(
+            [r.prompt.plain for r in rows], ["    KAP-5", " 1  KAP-1", " 2  KAP-2"]
+        )
         self.assertEqual(issues, before)
         self.assertIn("Now and next", self.centre.border_subtitle)
 
@@ -83,7 +89,10 @@ class LinearQueueTests(unittest.TestCase):
         self.app._filter = ""
         self.app._mine = False
         self.assertEqual(self.render([issue("KAP-3", 3, "backlog")]), [])
-        self.assertIn("no active or ready", self.rows.add_options.call_args.args[0][0].prompt.plain)
+        self.assertIn(
+            "no active or ready",
+            self.rows.add_options.call_args.args[0][0].prompt.plain,
+        )
 
     def test_project_grouping_keeps_manual_order(self):
         self.app._group_by = "project"
@@ -93,9 +102,17 @@ class LinearQueueTests(unittest.TestCase):
     def test_milestone_grouping_orders_by_due_date(self):
         self.app._group_by = "milestone"
         first = issue("KAP-2", 2)
-        first["projectMilestone"] = {"id": "m2", "name": "Later", "targetDate": "2026-12-01"}
+        first["projectMilestone"] = {
+            "id": "m2",
+            "name": "Later",
+            "targetDate": "2026-12-01",
+        }
         second = issue("KAP-1", 1)
-        second["projectMilestone"] = {"id": "m1", "name": "Soon", "targetDate": "2026-10-01"}
+        second["projectMilestone"] = {
+            "id": "m1",
+            "name": "Soon",
+            "targetDate": "2026-10-01",
+        }
         rows = self.render([first, second])
         self.assertEqual([r.id for r in rows], ["KAP-1", "KAP-2"])
         self.assertIn("Soon", self.rows.add_options.call_args.args[0][0].prompt.plain)
@@ -136,9 +153,12 @@ class PaginationTests(unittest.IsolatedAsyncioTestCase):
         )
         result = await ltui.LTUI.fetch_team_issues(app, "team")
         self.assertEqual(
-            [i["id"] for i in result["team"]["issues"]["nodes"]], ["old", "shared", "ready"]
+            [i["id"] for i in result["team"]["issues"]["nodes"]],
+            ["old", "shared", "ready"],
         )
-        self.assertEqual(app.gql.call_args.args[1], {"teamId": "team", "after": "cursor"})
+        self.assertEqual(
+            app.gql.call_args.args[1], {"teamId": "team", "after": "cursor"}
+        )
 
     async def test_nonadvancing_cursor_fails(self):
         app = SimpleNamespace(gql=AsyncMock(return_value=self.page([], True, "same")))
@@ -147,7 +167,12 @@ class PaginationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_later_failure_does_not_return_partial_queue(self):
         app = SimpleNamespace(
-            gql=AsyncMock(side_effect=[self.page(["old"], True, "cursor"), RuntimeError("offline")])
+            gql=AsyncMock(
+                side_effect=[
+                    self.page(["old"], True, "cursor"),
+                    RuntimeError("offline"),
+                ]
+            )
         )
         with self.assertRaisesRegex(RuntimeError, "offline"):
             await ltui.LTUI.fetch_team_issues(app, "team")

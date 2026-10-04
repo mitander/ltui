@@ -56,10 +56,12 @@ def _read_theme(path: Path, app: str) -> Theme:
         "screen-selection-foreground": variables["selection_foreground"],
         "input-selection-background": variables["selection_background"],
     }
+
     roles = data["roles"]
     for constant, role in _CHROME_ROLES.items():
         variable = "tracker-" + constant.removeprefix("C_").lower().replace("_", "-")
         textual_variables[variable] = roles[role]
+
     textual_variables.update(
         {
             "text": roles["text"],
@@ -107,6 +109,7 @@ def _read_theme(path: Path, app: str) -> Theme:
             "markdown-h6-color": roles["text_muted"],
         }
     )
+
     _ROLES[name] = roles
     return Theme(
         name=name,
@@ -131,7 +134,8 @@ def load_flume_themes(app: str) -> list[Theme]:
     root = _theme_dir()
     if root is None or not root.is_dir():
         return []
-    themes = []
+
+    themes: list[Theme] = []
     for path in sorted(root.glob("flume-*.json")):
         try:
             themes.append(_read_theme(path, app))
@@ -166,9 +170,13 @@ async def watch_flume_theme_changes() -> AsyncIterator[str]:
     schema_file = _schema_file()
     if schema_file is None:
         return
+
     extras = schema_file.parent.parent
     if not extras.is_dir():
         return
+
+    # Watch the parent rather than the resolved marker: activation replaces
+    # the current symlink atomically, so its previous target is not the owner.
     previous = active_flume_theme()
     async for _changes in awatch(extras, recursive=False):
         current = active_flume_theme()
