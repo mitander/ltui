@@ -60,36 +60,27 @@ workspace, team, and project, and its subtitle shows statuses, grouping, and ord
 
 ## Flume adapter
 
-`flume-theme/generate.lua` owns Pantheon-specific color generation. It reads
-`flume.palette` canonical schema metadata and semantic roles. It does not call
-Flume's compiler or activate a palette, and contains no copied palette colors.
+`flume-theme/flume_tracker_theme.py` maps Flume's version-1 semantic palette
+exports to tracker and Textual roles. It reads local JSON without compiling,
+activating, or copying a palette. Older generated Textual palettes remain readable.
 
-Install the adapter and both applications together:
-
-```sh
-python3 -m pip install ./flume-theme ./ltui ./jtui
-```
-
-Generate themes before launch:
+Install the adapter and both applications together in an active virtual environment:
 
 ```sh
-FLUME_RUNTIME=/absolute/path/to/flume.nvim \
-FLUME_TRACKER_OUTPUT=/absolute/path/to/generated-themes \
-nvim --headless --clean -l flume-theme/generate.lua
+python -m pip install -e ./flume-theme -e ./ltui -e ./jtui
 ```
 
-Set `FLUME_TRACKER_THEME_DIR` to that output and `FLUME_SCHEMA_FILE` to Flume's
-`extras/current/schema`. The loader watches atomic active-set swaps. Palette
-source edits require regeneration and an application restart; schema switches
-among loaded themes do not.
+Set `FLUME_TRACKER_THEME_DIR` to Flume's `extras/palette` directory and
+`FLUME_SCHEMA_FILE` to `extras/current/schema`. The loader watches atomic
+active-set swaps. After editing palette colors, run Flume's normal compile/sync
+command and restart the application. Switching among loaded schemas stays live.
+No separate Textual export, Neovim subprocess, or Nix build is needed.
 
-The dotfiles `scripts/dotfiles-nix.sh` helper uses this checkout when it exists
-at `~/c/p/ltui`, including uncommitted edits. Build and activate Home Manager,
-then restart the application to use the new snapshot. Local development does not
-require publishing or updating a remote pin. Machines without the checkout use
-the locked remote source. The adapter and applications share the selected source,
-while generated palettes use the pinned Flume source. Validation does not deploy.
-See `~/dotfiles/tracker-tui/README.md` for overrides and rebuild commands.
+Editable installation runs application and adapter code from this checkout.
+Restart after Python edits. Reinstall only after changing dependencies or package
+metadata, not after each source edit. The dotfiles `scripts/setup-trackers` command
+sets up this editable environment and its launchers provide the Flume paths.
+See `~/dotfiles/tracker-tui/README.md` for setup details.
 
 ## Maintain the fork
 
@@ -112,8 +103,8 @@ preserving both upstream behavior and the personal behavior documented above.
 Use `git rebase --abort` to cancel an update. Compare the old and new commit
 series with `git range-diff`, then run the checks below before publishing.
 After validation, update the clean mirror with `git branch -f main upstream/main`.
-Update the dotfiles fallback source pin when publishing, as described in
-`~/dotfiles/tracker-tui/README.md`. Local rebuilds do not require a pin update.
+Local editable installations use this checkout directly. Publishing is not required
+to try source changes.
 
 Keep new commits focused on one behavior. Match surrounding code style and avoid
 unrelated formatting changes: they increase conflicts without adding behavior.

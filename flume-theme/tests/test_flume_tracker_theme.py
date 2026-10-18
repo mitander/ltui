@@ -104,6 +104,70 @@ class FlumeTrackerThemeTests(unittest.TestCase):
         self.assertEqual(flume.theme_roles("flume-dusk")["status_completed"], "#00aa00")
         self.assertEqual(flume.theme_palette("flume-dusk")["C_TEXT"], "#eeeeee")
 
+    def test_reads_live_semantic_exports_without_generation(self) -> None:
+        palette = {
+            "format_version": 1,
+            "schema": "dusk",
+            "appearance": "dark",
+            "colors": {
+                **dict.fromkeys(
+                    (
+                        "text",
+                        "fg",
+                        "syntax_comment",
+                        "border",
+                        "border_variant",
+                        "accent",
+                        "syntax_keyword",
+                        "cyan",
+                        "success",
+                        "warning",
+                        "error",
+                        "syntax_type",
+                        "bg",
+                        "surface_alt",
+                        "surface",
+                        "border_focused",
+                        "element_active",
+                        "on_accent",
+                    ),
+                    "#222222",
+                ),
+                "bg": "#232136",
+                "text": "#eeeeee",
+                "warning": "#aa5500",
+            },
+        }
+        path = self.themes / "flume-dusk.json"
+        path.write_text(json.dumps(palette))
+        loaded = flume.load_flume_themes("ltui")
+        self.assertEqual([theme.name for theme in loaded], ["flume-dusk"])
+        self.assertEqual(loaded[0].background, "#232136")
+        self.assertEqual(loaded[0].variables["text"], "#eeeeee")
+        self.assertEqual(flume.theme_roles("flume-dusk")["status_started"], "#aa5500")
+
+        palette["colors"]["bg"] = "#ded4d1"
+        palette["appearance"] = "light"
+        path.write_text(json.dumps(palette))
+        changed = flume.load_flume_themes("jtui")[0]
+        self.assertEqual(changed.background, "#ded4d1")
+        self.assertFalse(changed.dark)
+        self.assertEqual(changed.variables["jtui-overlay"], "black 15%")
+
+        for key, value in (("format_version", 2), ("format_version", True), ("colors", [])):
+            invalid = {**palette, key: value}
+            path.write_text(json.dumps(invalid))
+            self.assertEqual(flume.load_flume_themes("ltui"), [])
+        palette["colors"]["bg"] = "not-a-color"
+        path.write_text(json.dumps(palette))
+        self.assertEqual(flume.load_flume_themes("ltui"), [])
+
+    def test_deeply_nested_json_is_ignored(self) -> None:
+        path = self.themes / "flume-dusk.json"
+        path.write_text("[" * 2000 + "0" + "]" * 2000)
+        self.assertEqual(flume.load_flume_themes("ltui"), [])
+        self.assertIsNone(flume.theme_roles("flume-dusk"))
+
     def test_reads_active_schema(self) -> None:
         self.assertIsNone(flume.active_flume_theme())
         self.activate("dusk")

@@ -5,12 +5,10 @@ cd "$(dirname "$0")/.."
 python=${PYTHON:-python3}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
-export FLUME_TRACKER_OUTPUT="$work/themes"
-export FLUME_TRACKER_THEME_DIR="$FLUME_TRACKER_OUTPUT"
+export FLUME_TRACKER_THEME_DIR="$FLUME_RUNTIME/extras/palette"
 export FLUME_SCHEMA_FILE="$work/extras/current/schema"
 export PYTHONPYCACHEPREFIX="$work/pycache"
 export PYTHONPATH="$PWD/flume-theme:$PWD/ltui:$PWD/jtui:$PWD/sctui"
-nvim --headless --clean -l flume-theme/generate.lua
 "$python" -m py_compile flume-theme/flume_tracker_theme.py ltui/ltui.py jtui/jtui.py sctui/sctui.py
 "$python" -m unittest discover -s flume-theme/tests -v
 "$python" -m unittest discover -s tests -v

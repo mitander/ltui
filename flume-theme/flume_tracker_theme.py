@@ -7,6 +7,7 @@ import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+from textual.color import Color, ColorParseError
 from textual.theme import Theme
 from watchfiles import awatch
 
@@ -36,8 +37,88 @@ def _schema_file() -> Path | None:
     return Path(value).expanduser() if value else None
 
 
+def _palette_theme(data: dict) -> dict:
+    """Map Flume's versioned semantic palette to tracker and Textual roles."""
+    if type(data["format_version"]) is not int or data["format_version"] != 1:
+        raise ValueError("unsupported Flume palette version")
+    if data["appearance"] not in ("dark", "light") or not isinstance(data["schema"], str):
+        raise ValueError("invalid Flume palette metadata")
+    colors = data["colors"]
+    if not isinstance(colors, dict):
+        raise ValueError("palette colors must be an object")
+    for value in colors.values():
+        if not isinstance(value, str):
+            raise ValueError("palette colors must be strings")
+        Color.parse(value)
+
+    roles = {
+        "text": "text",
+        "text_subtle": "fg",
+        "text_muted": "syntax_comment",
+        "border": "border",
+        "border_subtle": "border_variant",
+        "accent": "accent",
+        "accent_secondary": "syntax_keyword",
+        "accent_tertiary": "cyan",
+        "success": "success",
+        "warning": "warning",
+        "error": "error",
+        "status_triage": "warning",
+        "status_started": "warning",
+        "status_unstarted": "accent",
+        "status_backlog": "syntax_comment",
+        "status_completed": "success",
+        "status_canceled": "syntax_comment",
+        "team": "accent",
+        "project": "syntax_type",
+        "initiative": "syntax_keyword",
+        "label": "cyan",
+        "blocked": "error",
+        "blocking": "warning",
+        "priority_urgent": "error",
+    }
+    fields = {
+        "primary": "accent",
+        "secondary": "syntax_keyword",
+        "accent": "cyan",
+        "background": "bg",
+        "surface": "surface_alt",
+        "panel": "surface",
+        "foreground": "text",
+        "success": "success",
+        "warning": "warning",
+        "error": "error",
+    }
+    variables = {
+        "border": "border",
+        "border_focus": "border_focused",
+        "border_detail": "cyan",
+        "modal_bg": "surface",
+        "cursor": "element_active",
+        "scrollbar": "border_variant",
+        "scrollbar_hover": "border",
+        "scrollbar_active": "border_focused",
+        "scrollbar_background": "bg",
+        "selection_background": "accent",
+        "selection_foreground": "on_accent",
+    }
+    dark = data["appearance"] == "dark"
+    return {
+        "name": "flume-" + data["schema"],
+        "dark": dark,
+        **{field: colors[role] for field, role in fields.items()},
+        "roles": {name: colors[role] for name, role in roles.items()},
+        "variables": {
+            **{name: colors[role] for name, role in variables.items()},
+            "overlay": "black 40%" if dark else "black 15%",
+        },
+    }
+
+
 def _read_theme(path: Path, app: str) -> Theme:
     data = json.loads(path.read_text())
+    if isinstance(data, dict) and "format_version" in data:
+        data = _palette_theme(data)
     name = data["name"]
     variables = data["variables"]
     prefix = f"{app}-"
@@ -131,6 +212,7 @@ def _read_theme(path: Path, app: str) -> Theme:
 
 
 def load_flume_themes(app: str) -> list[Theme]:
+    _ROLES.clear()
     root = _theme_dir()
     if root is None or not root.is_dir():
         return []
@@ -139,7 +221,7 @@ def load_flume_themes(app: str) -> list[Theme]:
     for path in sorted(root.glob("flume-*.json")):
         try:
             themes.append(_read_theme(path, app))
-        except (OSError, KeyError, TypeError, ValueError):
+        except (OSError, KeyError, TypeError, ValueError, ColorParseError, RecursionError):
             continue
     return themes
 

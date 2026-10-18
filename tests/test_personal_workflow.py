@@ -73,10 +73,10 @@ class PersonalWorkflowTests(unittest.IsolatedAsyncioTestCase):
                                     / (app.theme + ".json")
                                 ).read_text()
                             )
-                            self.assertEqual(module.C_TEXT, data["roles"]["text"])
+                            self.assertEqual(module.C_TEXT, data["colors"]["text"])
                             self.assertEqual(
                                 module.tracker_state_color({"type": "started"}),
-                                data["roles"]["status_started"],
+                                data["colors"]["warning"],
                             )
                             if name == "ltui":
                                 title = app.screen.query_one("#duedate-title")
