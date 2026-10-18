@@ -34,6 +34,7 @@ class LinearQueueTests(unittest.TestCase):
         self.addCleanup(self.loader.stop)
         self.addCleanup(self.saver.stop)
         self.app = ltui.LTUI()
+        self.app._status_filter = "active"
         self.app._sidebar_hidden = True
         self.app._viewer_id = "me"
         self.rows = Mock()
@@ -52,78 +53,164 @@ class LinearQueueTests(unittest.TestCase):
         self.app.render_issues()
         return [o for o in self.rows.add_options.call_args.args[0] if o.id]
 
-    def test_default_focus_and_manual_order_ignore_assignment(self):
+    def test_active_manual_order_ignores_assignment(self):
         issues = [
-            issue("KAP-2", 20, assignee="me"),
-            issue("KAP-1", 0),
-            issue("KAP-3", 30, "backlog"),
-            issue("KAP-4", 40, "completed"),
-            issue("KAP-5", 50, "started"),
+            issue("DEV-2", 20, assignee="me"),
+            issue("DEV-1", 0),
+            issue("DEV-3", 30, "backlog"),
+            issue("DEV-4", 40, "completed"),
+            issue("DEV-5", 50, "started"),
         ]
         before = copy.deepcopy(issues)
         rows = self.render(issues)
-        self.assertTrue(self.app._focus)
-        self.assertEqual([r.id for r in rows], ["KAP-5", "KAP-1", "KAP-2"])
+        self.assertEqual(self.app._status_filter, "active")
+        self.assertEqual([r.id for r in rows], ["DEV-5", "DEV-1", "DEV-2"])
         self.assertEqual(
-            [r.prompt.plain for r in rows], ["    KAP-5", " 1  KAP-1", " 2  KAP-2"]
+            [r.prompt.plain for r in rows], ["    DEV-5", " 1  DEV-1", " 2  DEV-2"]
         )
         self.assertEqual(issues, before)
-        self.assertIn("Now and next", self.centre.border_subtitle)
+        self.assertIn("Active", self.centre.border_subtitle)
 
     def test_toggle_shows_all_and_persists(self):
-        self.render([issue("KAP-1", 1), issue("KAP-2", 2, "backlog")])
+        self.render([issue("DEV-1", 1), issue("DEV-2", 2, "backlog")])
+        self.app.push_screen = Mock()
         self.app.action_toggle_focus()
+        self.app.push_screen.call_args.args[1]("all")
         rows = [o for o in self.rows.add_options.call_args.args[0] if o.id]
-        self.assertEqual([r.id for r in rows], ["KAP-1", "KAP-2"])
-        self.assertEqual(rows[0].prompt.plain, "KAP-1")
-        self.assertFalse(self.state["focus"])
-        self.assertFalse(ltui.LTUI()._focus)
-        self.assertIn("All issues", self.centre.border_subtitle)
+        self.assertEqual([r.id for r in rows], ["DEV-1", "DEV-2"])
+        self.assertEqual(rows[0].prompt.plain, "DEV-1")
+        self.assertEqual(self.state["status_filter"], "all")
+        self.assertEqual(ltui.LTUI()._status_filter, "all")
+        self.assertIn("All statuses", self.centre.border_subtitle)
 
     def test_filters_and_empty_queue(self):
         self.app._mine = True
-        rows = self.render([issue("KAP-1", 1), issue("KAP-2", 2, assignee="me")])
-        self.assertEqual([r.id for r in rows], ["KAP-2"])
+        rows = self.render([issue("DEV-1", 1), issue("DEV-2", 2, assignee="me")])
+        self.assertEqual([r.id for r in rows], ["DEV-2"])
         self.app._filter = "missing"
         self.assertEqual(self.render(self.app._issues), [])
         self.app._filter = ""
         self.app._mine = False
-        self.assertEqual(self.render([issue("KAP-3", 3, "backlog")]), [])
+        self.assertEqual(self.render([issue("DEV-3", 3, "backlog")]), [])
         self.assertIn(
-            "no active or ready",
+            "no issues for these statuses",
             self.rows.add_options.call_args.args[0][0].prompt.plain,
         )
 
+    def test_default_workflow_has_four_sections_in_manual_order(self):
+        self.assertEqual(ltui.LTUI()._status_filter, "workflow")
+        self.app._status_filter = "workflow"
+        rows = self.render([
+            issue("DEV-4", 1, "completed"),
+            issue("DEV-3", 1, "backlog"),
+            issue("DEV-2", 2),
+            issue("DEV-1", 1, "started"),
+            issue("DEV-5", 0, "canceled"),
+            issue("DEV-6", 1),
+        ])
+        self.assertEqual([row.id for row in rows], ["DEV-1", "DEV-6", "DEV-2", "DEV-3", "DEV-4"])
+
+    def test_group_picker_is_explicit_and_does_not_change_filters(self):
+        self.app.push_screen = Mock()
+        self.app.action_toggle_group()
+        self.assertEqual(self.app._group_by, "status")
+        self.app.push_screen.call_args.args[1]("milestone")
+        self.assertEqual(self.app._group_by, "milestone")
+        self.assertEqual(self.app._status_filter, "active")
+        self.assertEqual(self.state["group_by"], "milestone")
+
+    def test_project_choice_persists_per_repository_and_scope(self):
+        first = issue("DEV-1", 1)
+        first["project"] = {"id": "one", "name": "First"}
+        second = issue("DEV-2", 2)
+        second["project"] = {"id": "two", "name": "Second"}
+        self.app._team = {"id": "dev", "key": "DEV"}
+        self.app._org = "Workspace"
+        self.app._issues = [first, second]
+        self.app.push_screen = Mock()
+        self.app.action_pick_project()
+        self.app.push_screen.call_args.args[1]("proj:two")
+        self.assertEqual([i["id"] for i in self.app._visible_issues()], ["DEV-2"])
+        self.assertIn("Workspace / DEV / Second", self.centre.border_title)
+        self.app._project_choice_key = None
+        self.app._project_filter = None
+        self.app._resolve_project_filter()
+        self.assertEqual(self.app._project_filter, "two")
+        self.app._team = {"id": "other", "key": "OTHER"}
+        with patch.dict(ltui.os.environ, {"TRACKER_PROJECT": "missing"}):
+            self.app._resolve_project_filter()
+        self.assertIsNone(self.app._project_filter)
+        self.app._team = {"id": "dev", "key": "DEV"}
+        self.app._resolve_project_filter()
+        self.assertEqual(self.app._project_filter, "two")
+
+    def test_repository_project_match_and_manual_all_override(self):
+        first = issue("DEV-1", 1)
+        first["project"] = {"id": "one", "name": "My Project"}
+        self.app._repository = ltui.Path("/projects/my-project")
+        self.app._team = {"id": "dev", "key": "DEV"}
+        with patch.dict(ltui.os.environ, {}, clear=True):
+            self.app._set_issues([first], [])
+            self.assertEqual(self.app._project_filter, "one")
+            duplicate = issue("DEV-2", 2)
+            duplicate["project"] = {"id": "two", "name": "my-project"}
+            self.app._set_issues([first, duplicate], [])
+            self.assertIsNone(self.app._project_filter)
+            self.app._set_issues([first], [])
+            self.assertEqual(self.app._project_filter, "one")
+        self.app.push_screen = Mock()
+        self.app.action_pick_project()
+        self.app.push_screen.call_args.args[1]("all:")
+        self.app._project_choice_key = None
+        with patch.dict(ltui.os.environ, {}, clear=True):
+            self.app._set_issues([first], [])
+        self.assertIsNone(self.app._project_filter)
+        self.assertEqual(self.app._group_by, "status")
+
+    def test_project_match_rejects_ambiguous_and_missing_names(self):
+        projects = [{"id": "one", "name": "My Project"}, {"id": "two", "name": "my-project"}]
+        with patch.dict(ltui.os.environ, {}, clear=True):
+            self.assertIsNone(ltui.matching_project(projects, ltui.Path("/my-project")))
+            self.assertIsNone(ltui.matching_project(projects, ltui.Path("/unknown")))
+        with patch.dict(ltui.os.environ, {"TRACKER_PROJECT": "two"}):
+            self.assertEqual(ltui.matching_project(projects, ltui.Path("/unknown")), projects[1])
+
+    def test_repository_context_uses_git_root_or_directory(self):
+        with patch.object(ltui.subprocess, "run", return_value=SimpleNamespace(stdout="/projects/repo\n")):
+            self.assertEqual(ltui.repository_context(), ltui.Path("/projects/repo").resolve())
+        with patch.object(ltui.subprocess, "run", side_effect=FileNotFoundError):
+            self.assertEqual(ltui.repository_context(), ltui.Path.cwd().resolve())
+
     def test_project_grouping_keeps_manual_order(self):
         self.app._group_by = "project"
-        rows = self.render([issue("KAP-2", 2, assignee="me"), issue("KAP-1", 1)])
-        self.assertEqual([r.id for r in rows], ["KAP-1", "KAP-2"])
+        rows = self.render([issue("DEV-2", 2, assignee="me"), issue("DEV-1", 1)])
+        self.assertEqual([r.id for r in rows], ["DEV-1", "DEV-2"])
 
     def test_milestone_grouping_orders_by_due_date(self):
         self.app._group_by = "milestone"
-        first = issue("KAP-2", 2)
+        first = issue("DEV-2", 2)
         first["projectMilestone"] = {
             "id": "m2",
             "name": "Later",
             "targetDate": "2026-12-01",
         }
-        second = issue("KAP-1", 1)
+        second = issue("DEV-1", 1)
         second["projectMilestone"] = {
             "id": "m1",
             "name": "Soon",
             "targetDate": "2026-10-01",
         }
         rows = self.render([first, second])
-        self.assertEqual([r.id for r in rows], ["KAP-1", "KAP-2"])
+        self.assertEqual([r.id for r in rows], ["DEV-1", "DEV-2"])
         self.assertIn("Soon", self.rows.add_options.call_args.args[0][0].prompt.plain)
 
     def test_old_cache_rank_is_unknown_and_last(self):
-        rows = self.render([issue("KAP-2", None), issue("KAP-1", -1)])
-        self.assertEqual([r.id for r in rows], ["KAP-1", "KAP-2"])
+        rows = self.render([issue("DEV-2", None), issue("DEV-1", -1)])
+        self.assertEqual([r.id for r in rows], ["DEV-1", "DEV-2"])
         self.assertTrue(rows[1].prompt.plain.startswith(" ?"))
 
     def test_focus_rows_keep_due_dates_and_update_time(self):
-        dated = issue("KAP-1", 1)
+        dated = issue("DEV-1", 1)
         dated.update(
             dueDate="2026-12-31",
             updatedAt="2026-09-14T00:00:00Z",
@@ -150,6 +237,9 @@ class LinearQueueTests(unittest.TestCase):
         self.assertIn("sortOrder", ltui.ISSUE_FIELDS)
         self.assertIn("pageInfo", ltui.QL_ISSUES)
         self.assertEqual(ltui.DEFAULT_KEYBINDS["toggle_focus"][0], ["f"])
+        self.assertEqual(ltui.DEFAULT_KEYBINDS["pick_project"][0], ["p", "V"])
+        self.assertEqual(ltui.DEFAULT_KEYBINDS["change_priority"][0], ["P"])
+        self.assertEqual(ltui.DEFAULT_KEYBINDS["move_project"][0], ["M"])
         self.assertIn("milestone", ltui.GROUP_MODES)
         self.assertIn("projectMilestone", ltui.ISSUE_FIELDS)
 

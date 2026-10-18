@@ -15,13 +15,48 @@ Preserve upstream LICENSE, NOTICE, and attribution.
 - Start with the sidebar hidden; `b` toggles and persists its visibility.
 - Prefer `TRACKER_SCOPE`, then `TRACKER_REPOSITORY`, for scope selection.
   Without a match, show the sidebar rather than silently selecting a saved team.
-- In ltui, `f` toggles Now and next (started/unstarted) versus all issues.
-  Sort by Linear manual order, not assignment or update time. Unknown cached
-  ranks sort last and display `?`. Pagination fetches the complete team queue.
+- In ltui, `p` (or `V`) chooses a project, `f` chooses included statuses, and
+  `v` chooses grouping. These controls are independent. Default to status
+  sections with In Progress, Todo, Backlog, and Done. Exclude canceled and triage
+  unless All statuses is selected. Priority uses `P`, and moving a ticket to a
+  project uses `M`. Custom keybindings still override these defaults.
+- Sort by Linear manual order, not assignment or update time. Active view
+  numbers Todo issues. Unknown cached ranks sort last and display `?` there.
+  Pagination fetches the complete team queue.
 - Add milestone grouping and detail metadata in ltui.
 
 These changes are maintained directly in application source. The old dotfiles
 replacement script was applied once during migration; it is not a build input.
+
+## Project context in ltui
+
+Launch ltui inside a checkout to select its matching project automatically.
+Matching ignores case, spaces, and punctuation, but requires one unique project
+name. Projects come from the loaded team's issues. With no match or an ambiguous
+match, show all projects in the current team.
+
+The repository hint is `TRACKER_REPOSITORY`, or the Git root directory name when
+unset. Outside Git, use the current directory name. To override the project hint:
+
+```sh
+TRACKER_SCOPE=dev TRACKER_PROJECT="Project name or ID" ltui
+```
+
+Team selection still uses `TRACKER_SCOPE` and `TRACKER_REPOSITORY`. Project
+matching does not change teams or Linear credentials. `TRACKER_PROJECT` takes
+precedence over the repository hint for project matching only.
+
+`p` offers All projects and individual projects alphabetically. A manual choice,
+including All projects, takes precedence over inference and persists per
+checkout, workspace, and team. Select another project with `p` to change it.
+Status and grouping preferences persist independently. Old `focus` preferences
+are replaced by the Workflow status default on the first launch after upgrading.
+
+`f` offers Workflow (In Progress, Todo, Backlog, Done), Active (In Progress,
+Todo), All statuses, and each of the four workflow types individually. `v`
+shows an explicit menu for status, project, milestone, or initiative grouping.
+Only sections containing matching issues appear. The board title shows the
+workspace, team, and project, and its subtitle shows statuses, grouping, and order.
 
 ## Flume adapter
 
@@ -48,10 +83,13 @@ Set `FLUME_TRACKER_THEME_DIR` to that output and `FLUME_SCHEMA_FILE` to Flume's
 source edits require regeneration and an application restart; schema switches
 among loaded themes do not.
 
-Dotfiles `home/common.nix` builds a hash-pinned local snapshot of this checkout,
-builds the adapter, generates themes from the current canonical palette source,
-and supplies both environment defaults. It does not deploy during validation.
-A remote source pin requires publishing this fork separately.
+The dotfiles `scripts/dotfiles-nix.sh` helper uses this checkout when it exists
+at `~/c/p/ltui`, including uncommitted edits. Build and activate Home Manager,
+then restart the application to use the new snapshot. Local development does not
+require publishing or updating a remote pin. Machines without the checkout use
+the locked remote source. The adapter and applications share the selected source,
+while generated palettes use the pinned Flume source. Validation does not deploy.
+See `~/dotfiles/tracker-tui/README.md` for overrides and rebuild commands.
 
 ## Maintain the fork
 
@@ -74,7 +112,8 @@ preserving both upstream behavior and the personal behavior documented above.
 Use `git rebase --abort` to cancel an update. Compare the old and new commit
 series with `git range-diff`, then run the checks below before publishing.
 After validation, update the clean mirror with `git branch -f main upstream/main`.
-Refresh the dotfiles source hash as described in `dotfiles/tracker-tui/README.md`.
+Update the dotfiles fallback source pin when publishing, as described in
+`~/dotfiles/tracker-tui/README.md`. Local rebuilds do not require a pin update.
 
 Keep new commits focused on one behavior. Match surrounding code style and avoid
 unrelated formatting changes: they increase conflicts without adding behavior.

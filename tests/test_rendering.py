@@ -40,16 +40,16 @@ class RenderingPhaseTests(unittest.TestCase):
                 app = self.app(name)
                 project = {"id": "project", "name": "Example", "color": None}
                 app._issues = [
-                    issue("KAP-1", "unstarted", 1, "me", project),
-                    issue("KAP-2", "started", 2, "other", project),
-                    issue("KAP-3", "unstarted", 3, "me"),
-                    issue("KAP-4", "completed", 4, "me", project),
+                    issue("DEV-1", "unstarted", 1, "me", project),
+                    issue("DEV-2", "started", 2, "other", project),
+                    issue("DEV-3", "unstarted", 3, "me"),
+                    issue("DEV-4", "completed", 4, "me", project),
                 ]
                 original = copy.deepcopy(app._issues)
                 app._mine = True
                 app._project_filter = "project"
                 app._filter = "EXAMPLE"
-                expected = ["KAP-1"] if name == "ltui" else ["KAP-1", "KAP-4"]
+                expected = ["DEV-1", "DEV-4"]
                 self.assertEqual(
                     [record["id"] for record in app._visible_issues()], expected
                 )
@@ -61,10 +61,10 @@ class RenderingPhaseTests(unittest.TestCase):
     def test_project_groups_keep_provider_specific_issue_order(self):
         project = {"id": "project", "name": "Example", "color": None}
         records = [
-            issue("KAP-2", "unstarted", 2, "me", project),
-            issue("KAP-1", "unstarted", 1, "other", project),
-            issue("KAP-3", "started", 3, "other", project),
-            issue("KAP-4", "unstarted", 4),
+            issue("DEV-2", "unstarted", 2, "me", project),
+            issue("DEV-1", "unstarted", 1, "other", project),
+            issue("DEV-3", "started", 3, "other", project),
+            issue("DEV-4", "unstarted", 4),
         ]
         original = copy.deepcopy(records)
         for name in ("ltui", "jtui", "sctui"):
@@ -73,12 +73,12 @@ class RenderingPhaseTests(unittest.TestCase):
                 app._group_by = "project"
                 groups = app._issue_groups(records, 80)
                 expected = (
-                    ["KAP-3", "KAP-1", "KAP-2"]
+                    ["DEV-3", "DEV-1", "DEV-2"]
                     if name == "ltui"
-                    else ["KAP-3", "KAP-2", "KAP-1"]
+                    else ["DEV-3", "DEV-2", "DEV-1"]
                 )
                 self.assertEqual([record["id"] for record in groups[0][1]], expected)
-                self.assertEqual([record["id"] for record in groups[1][1]], ["KAP-4"])
+                self.assertEqual([record["id"] for record in groups[1][1]], ["DEV-4"])
                 self.assertIn("Example", groups[0][0].plain)
                 self.assertEqual(records, original)
 
@@ -88,16 +88,16 @@ class RenderingPhaseTests(unittest.TestCase):
         early = {"id": "early", "name": "Soon", "targetDate": "2026-10-01"}
         late = {"id": "late", "name": "Later", "targetDate": "2026-12-01"}
         records = [
-            issue("KAP-3", "unstarted", 3, milestone=late),
-            issue("KAP-2", "unstarted", 2),
-            issue("KAP-1", "unstarted", 1, project=project, milestone=early),
+            issue("DEV-3", "unstarted", 3, milestone=late),
+            issue("DEV-2", "unstarted", 2),
+            issue("DEV-1", "unstarted", 1, project=project, milestone=early),
         ]
         original = copy.deepcopy(records)
         app._group_by = "milestone"
         groups = app._issue_groups(records, 80)
         self.assertEqual(
             [[record["id"] for record in group] for _, group in groups],
-            [["KAP-1"], ["KAP-3"], ["KAP-2"]],
+            [["DEV-1"], ["DEV-3"], ["DEV-2"]],
         )
 
         app._group_by = "initiative"
@@ -107,7 +107,7 @@ class RenderingPhaseTests(unittest.TestCase):
         groups = app._issue_groups(records, 80)
         self.assertEqual(
             [[record["id"] for record in group] for _, group in groups],
-            [["KAP-1"], ["KAP-2", "KAP-3"]],
+            [["DEV-1"], ["DEV-2", "DEV-3"]],
         )
         self.assertEqual(records, original)
 

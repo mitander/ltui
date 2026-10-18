@@ -159,6 +159,40 @@ def preferred_tracker_scope(scopes: list[dict]) -> dict | None:
     return None
 
 
+def repository_context() -> Path:
+    """Use the checkout root, even when launched from a nested directory."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=True,
+        )
+        return Path(result.stdout.strip()).resolve()
+    except (OSError, subprocess.SubprocessError):
+        return Path.cwd().resolve()
+
+
+def matching_project(projects: list[dict], repository: Path) -> dict | None:
+    """Only a unique normalized name or explicit ID is safe to select."""
+    hint = (
+        os.environ.get("TRACKER_PROJECT")
+        or os.environ.get("TRACKER_REPOSITORY")
+        or repository.name
+    )
+
+    def normalize(value: str) -> str:
+        return "".join(character for character in value.casefold() if character.isalnum())
+
+    matches = [
+        project
+        for project in projects
+        if project["id"] == hint or normalize(project["name"]) == normalize(hint)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 # ── themes ────────────────────────────────────────────────────────────────
 _ACCENTS = dict(success=C_GREEN, warning="#f9e2af", error=C_RED, dark=True)
 
@@ -325,7 +359,19 @@ INITIATIVE_RANK = {
     "Canceled": 4,
 }
 
-GROUP_MODES = ["status", "project", "initiative", "milestone"]
+GROUP_MODES = ["status", "project", "milestone", "initiative"]
+STATUS_FILTERS = {
+    "workflow": (
+        "Workflow: In Progress / Todo / Backlog / Done",
+        {"started", "unstarted", "backlog", "completed"},
+    ),
+    "active": ("Active: In Progress / Todo", {"started", "unstarted"}),
+    "all": ("All statuses", None),
+    "started": ("In Progress only", {"started"}),
+    "unstarted": ("Todo only", {"unstarted"}),
+    "backlog": ("Backlog only", {"backlog"}),
+    "completed": ("Done only", {"completed"}),
+}
 
 # the due-date column takes 8 columns off the title. Below this list width —
 # roughly a half-screen list with the detail panel open — the title has none to
@@ -504,19 +550,19 @@ DEFAULT_KEYBINDS = {
     "add_comment": (["c"], "comment"),
     "filter": (["slash"], "filter"),
     "toggle_mine": (["m"], "mine"),
-    "toggle_focus": (["f"], "view"),
+    "toggle_focus": (["f"], "statuses"),
     "toggle_group": (["v"], "group"),
     "toggle_sidebar": (["b"], None),
-    "pick_project": (["V"], None),
+    "pick_project": (["p", "V"], "project"),
     "cycle_theme": (["t"], "theme"),
     "open_settings": (["comma"], None),
     "help": (["question_mark"], "help"),
     "quit": (["q"], "quit"),
     "refresh": (["r"], None),
-    "change_priority": (["p"], None),
+    "change_priority": (["P"], None),
     "change_due_date": (["d"], None),
     "edit_labels": (["l"], None),
-    "move_project": (["P"], None),
+    "move_project": (["M"], None),
     "change_assignee": (["a"], None),
     "open_browser": (["o"], None),
     "yank": (["y"], None),
@@ -576,16 +622,16 @@ CONFIG_TEMPLATE = """{
     "toggle_focus": "f",
     "toggle_group": "v",
     "toggle_sidebar": "b",
-    "pick_project": "V",
+    "pick_project": ["p", "V"],
     "cycle_theme": "t",
     "open_settings": "comma",
     "help": "question_mark",
     "quit": "q",
     "refresh": "r",
-    "change_priority": "p",
+    "change_priority": "P",
     "change_due_date": "d",
     "edit_labels": "l",
-    "move_project": "P",
+    "move_project": "M",
     "change_assignee": "a",
     "open_browser": "o",
     "yank": "y",
@@ -1498,10 +1544,10 @@ class HelpModal(ModalScreen):
         ("ticket", [
             ("n", "new ticket in the current team"),
             ("s", "change status"),
-            ("p", "change priority"),
+            ("P", "change priority"),
             ("d", "set or clear due date"),
             ("l", "edit labels"),
-            ("P", "move to a project (or create one)"),
+            ("M", "move to a project (or create one)"),
             ("a", "change assignee (or unassign)"),
             ("c", "add a comment (ctrl+s to send)"),
             ("y", "yank — copy branch / url / identifier"),
@@ -1511,10 +1557,10 @@ class HelpModal(ModalScreen):
         ("view", [
             ("/", "filter issues"),
             ("m", "toggle mine only"),
-            ("f", "Now and next / All issues (manual order)"),
+            ("f", "choose status filter"),
             ("b", "toggle team sidebar"),
-            ("v", "group by status / project / initiative"),
-            ("V", "filter to a single project"),
+            ("v", "choose grouping (status by default)"),
+            ("p / V", "choose project"),
             ("t", "cycle theme"),
             (",", "settings"),
             ("r", "refresh"),
@@ -1606,7 +1652,7 @@ class WelcomeModal(ModalScreen):
 def hint_markup() -> str:
     return (
         f"[@click=app.change_status][{C_BLUE}]s[/] [{C_DIM}]status[/][/]  "
-        f"[@click=app.change_priority][{C_BLUE}]p[/] [{C_DIM}]priority[/][/]  "
+        f"[@click=app.change_priority][{C_BLUE}]P[/] [{C_DIM}]priority[/][/]  "
         f"[@click=app.change_due_date][{C_BLUE}]d[/] [{C_DIM}]due[/][/]  "
         f"[@click=app.add_comment][{C_BLUE}]c[/] [{C_DIM}]comment[/][/]  "
         f"[@click=app.open_browser][{C_BLUE}]o[/] [{C_DIM}]browser[/][/]  "
@@ -1832,7 +1878,11 @@ class LTUI(App):
         self._boot_data: dict | None = None
         self._org: str | None = None
         self._mine = load_state().get("mine", False)
-        self._focus = load_state().get("focus", True)
+        self._status_filter = load_state().get("status_filter", "workflow")
+        if self._status_filter not in STATUS_FILTERS:
+            self._status_filter = "workflow"
+        self._repository = repository_context()
+        self._project_choice_key: tuple[str | None, str | None] | None = None
         self._group_by = load_state().get("group_by", "status")
         if self._group_by not in GROUP_MODES:
             self._group_by = "status"
@@ -2131,7 +2181,7 @@ class LTUI(App):
         data["mine"] = self._mine
         data["theme"] = self.theme
         data["group_by"] = self._group_by
-        data["focus"] = self._focus
+        data["status_filter"] = self._status_filter
         data["sidebar_hidden"] = self._sidebar_hidden
         save_state(data)
 
@@ -2198,8 +2248,31 @@ class LTUI(App):
         self._issues = issues
         self._states = states
         self._issue_by_id = {i["id"]: i for i in issues}
+        self._resolve_project_filter()
         if self._team is not None and not self._all_teams:
             self._states_by_team[self._team["id"]] = states
+
+    def _resolve_project_filter(self) -> None:
+        # Scope preferences to workspace, team, and checkout. A manual choice
+        # wins over inference and survives refreshes, including an empty project.
+        key = (self._org, self._scope_id())
+        if key == self._project_choice_key:
+            return
+        self._project_filter = None
+        self._project_choice_key = None
+        choices = load_state().get("project_choices", {})
+        choice_key = json.dumps([*key, str(self._repository)])
+        if choice_key in choices:
+            self._project_filter = choices[choice_key]
+            self._project_choice_key = key
+            return
+        projects = {
+            issue["project"]["id"]: issue["project"]
+            for issue in self._issues if issue.get("project")
+        }
+        project = matching_project(list(projects.values()), self._repository)
+        if project is not None:
+            self._project_filter = project["id"]
 
     def _set_initiatives(self, nodes: list[dict]) -> None:
         self._initiatives = sorted(nodes, key=initiative_sort_key)
@@ -2614,10 +2687,9 @@ class LTUI(App):
         """Apply view filters without changing the cached issue records."""
         filter_text = self._filter.lower()
         issues = self._issues
-        if self._focus:
-            issues = [
-                i for i in issues if i["state"]["type"] in {"started", "unstarted"}
-            ]
+        allowed_types = STATUS_FILTERS[self._status_filter][1]
+        if allowed_types is not None:
+            issues = [i for i in issues if i["state"]["type"] in allowed_types]
         if self._mine and self._viewer_id:
             issues = [
                 i
@@ -2782,7 +2854,7 @@ class LTUI(App):
             for i in group:
                 self._opt_index[i["id"]] = len(opts)
                 prefix = ""
-                if self._focus:
+                if self._status_filter == "active":
                     if i["state"]["type"] == "unstarted":
                         ready_position += 1
                         position = (
@@ -2800,8 +2872,8 @@ class LTUI(App):
         if not opts:
             if self._filter.lower():
                 message = "no matches"
-            elif self._focus:
-                message = "no active or ready issues · f shows all"
+            elif self._status_filter != "all":
+                message = "no issues for these statuses · f changes statuses"
             else:
                 message = "no issues"
             opts.append(Option(Text(f"  {message}", style=C_DIM), disabled=True))
@@ -2810,7 +2882,6 @@ class LTUI(App):
         # a group's first issue sits right after its header row
         self._group_starts = [h + 1 for h in self._header_indices]
         mine_tag = " \uf007 mine \u00b7" if self._mine else ""
-        proj_tag = ""
         if self._project_filter is not None:
             pname = (
                 next(
@@ -2824,15 +2895,15 @@ class LTUI(App):
                 )
                 or "no project"
             )
-            proj_tag = f" \uf07b {pname} \u00b7"
-        # with three groupings the active one is worth stating; status is the
-        # default the headers already make obvious
-        group_tag = (
-            f" \uf0ca {self._group_by} \u00b7" if self._group_by != "status" else ""
+        project_name = pname if self._project_filter is not None else "All projects"
+        team_name = self._team["key"] if self._team else "No team"
+        self.query_one("#centre").border_title = (
+            f" {self._org or 'Linear'} / {team_name} / {project_name} "
         )
+        status_label = STATUS_FILTERS[self._status_filter][0].split(":")[0]
         self.query_one("#centre").border_subtitle = (
-            f" {'Now and next' if self._focus else 'All issues'} · manual ·"
-            f"{mine_tag}{proj_tag}{group_tag} {len(issues)} issues "
+            f" {status_label} · group: {self._group_by} · manual ·"
+            f"{mine_tag} {len(issues)} issues "
         )
         if keep and keep in self._opt_index:
             issues_list.highlighted = self._opt_index[keep]
@@ -3206,7 +3277,7 @@ class LTUI(App):
             row.append("  \uf00c", style=C_GREEN)
         opts.append(Option(row, id="all:"))
         for pid, p in sorted(
-            projects.items(), key=lambda x: (x[0] == "", -counts[x[0]])
+            projects.items(), key=lambda x: (x[0] == "", x[1]["name"].casefold())
         ):
             row = Text()
             row.append("\uf07b ", style=tracker_role_color("project", C_DIM))
@@ -3223,6 +3294,12 @@ class LTUI(App):
                 self._project_filter = None
             else:
                 self._project_filter = choice.removeprefix("proj:")
+            self._project_choice_key = (self._org, self._scope_id())
+            data = load_state()
+            choices = data.setdefault("project_choices", {})
+            key = json.dumps([self._org, self._scope_id(), str(self._repository)])
+            choices[key] = self._project_filter
+            save_state(data)
             self.render_issues()
 
         self.push_screen(PickerModal("filter by project", opts), done)
@@ -3269,20 +3346,36 @@ class LTUI(App):
             self.query_one("#d-scroll").focus()
 
     def action_toggle_group(self) -> None:
-        nxt = (GROUP_MODES.index(self._group_by) + 1) % len(GROUP_MODES)
-        self._group_by = GROUP_MODES[nxt]
-        self._save_state()
-        if self._group_by == "initiative" and self._initiatives is None:
-            # first look at this board \u2014 group now, fill the headers in when
-            # the workspace's initiatives land
-            self.load_initiatives(rerender=True)
-        self.render_issues()
-        self.notify(f"\uf0ca grouping by {self._group_by}")
+        options = [
+            Option(f"{mode}{' ✓' if mode == self._group_by else ''}", id=mode)
+            for mode in GROUP_MODES
+        ]
+
+        def done(choice: str | None) -> None:
+            if choice is None:
+                return
+            self._group_by = choice
+            self._save_state()
+            if choice == "initiative" and self._initiatives is None:
+                self.load_initiatives(rerender=True)
+            self.render_issues()
+
+        self.push_screen(PickerModal("group issues by", options), done)
 
     def action_toggle_focus(self) -> None:
-        self._focus = not self._focus
-        self._save_state()
-        self.render_issues()
+        options = [
+            Option(f"{label}{' ✓' if key == self._status_filter else ''}", id=key)
+            for key, (label, _) in STATUS_FILTERS.items()
+        ]
+
+        def done(choice: str | None) -> None:
+            if choice is None:
+                return
+            self._status_filter = choice
+            self._save_state()
+            self.render_issues()
+
+        self.push_screen(PickerModal("filter by status", options), done)
 
     def action_toggle_mine(self) -> None:
         self._mine = not self._mine
@@ -3716,11 +3809,11 @@ config: ~/.config/ltui/config.json remaps any keybind and sets options
 auth: LINEAR_API_KEY env var, ~/.config/ltui/config.toml, or
       linear-cli's config. no key? ltui asks on first launch.
 
-keys: enter open ticket   n new   s status   p priority   d due date
+keys: enter open ticket   n new   s status   P priority   d due date
       c comment
-      a assign   l labels   P project   o browser   y yank   / filter
+      a assign   l labels   M move project   o browser   y yank   / filter
       x run ~/.linear/coding-tools.json custom script on the ticket
-      m mine only   f Now and next / All issues   v group status/project/initiative/milestone
+      m mine only   f choose statuses   p choose project   v choose grouping
       V one project   t theme
       , settings   j/k navigate   g/G top/bottom   r refresh   ? help
       q quit
