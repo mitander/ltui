@@ -78,6 +78,10 @@ class PersonalWorkflowTests(unittest.IsolatedAsyncioTestCase):
                                 module.tracker_state_color({"type": "started"}),
                                 data["colors"]["warning"],
                             )
+                            self.assertEqual(
+                                module.tracker_role_color("blocking"),
+                                data["colors"]["syntax_type"],
+                            )
                             if name == "ltui":
                                 title = app.screen.query_one("#duedate-title")
                                 field = app.screen.query_one("#duedate-input")

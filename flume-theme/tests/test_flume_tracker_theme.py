@@ -136,6 +136,8 @@ class FlumeTrackerThemeTests(unittest.TestCase):
                 "bg": "#232136",
                 "text": "#eeeeee",
                 "warning": "#aa5500",
+                "syntax_type": "#705883",
+                "error": "#9d395e",
             },
         }
         path = self.themes / "flume-dusk.json"
@@ -145,6 +147,10 @@ class FlumeTrackerThemeTests(unittest.TestCase):
         self.assertEqual(loaded[0].background, "#232136")
         self.assertEqual(loaded[0].variables["text"], "#eeeeee")
         self.assertEqual(flume.theme_roles("flume-dusk")["status_started"], "#aa5500")
+        roles = flume.theme_roles("flume-dusk")
+        self.assertEqual(roles["blocking"], "#705883")
+        self.assertEqual(roles["blocked"], "#9d395e")
+        self.assertEqual(roles["warning"], "#aa5500")
 
         palette["colors"]["bg"] = "#ded4d1"
         palette["appearance"] = "light"

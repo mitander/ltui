@@ -3,7 +3,7 @@
 import copy
 import importlib
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 def issue(identifier, state_type, rank, assignee=None, project=None, milestone=None):
@@ -33,6 +33,39 @@ class RenderingPhaseTests(unittest.TestCase):
             app = getattr(module, name.upper())()
         app._viewer_id = "me"
         return app
+
+    def test_dependency_icons_and_detail_labels_share_roles(self):
+        from rich.console import Console
+
+        record = issue("DEV-1", "unstarted", 1)
+        record.update(
+            priority=0,
+            createdAt="2026-09-20T12:00:00Z",
+            labels={"nodes": []},
+            relations={"nodes": [{"type": "blocks", "relatedIssue": {"identifier": "DEV-2"}}]},
+            inverseRelations={"nodes": [{"type": "blocks", "issue": {"identifier": "DEV-3"}}]},
+        )
+        console = Console()
+        for name in ("ltui", "jtui"):
+            with self.subTest(app=name):
+                module = importlib.import_module(name)
+                app = self.app(name)
+                roles = {"blocking": "#705883", "blocked": "#9d395e"}
+                meta_widget = Mock()
+                with (
+                    patch.object(module, "_TRACKER_ROLES", roles),
+                    patch.object(app, "query_one", return_value=meta_widget),
+                ):
+                    row = app._issue_row(record, 120, 5)
+                    app._update_detail_meta(record)
+                meta = meta_widget.update.call_args.args[0]
+                for text in (row, meta):
+                    for glyph, role in (("\uf06a", "blocking"), ("\uf056", "blocked")):
+                        color = text.get_style_at_offset(console, text.plain.index(glyph)).color
+                        self.assertEqual(color.get_truecolor().hex, roles[role])
+                for label, role in (("blocks DEV-2", "blocking"), ("blocked by DEV-3", "blocked")):
+                    color = meta.get_style_at_offset(console, meta.plain.index(label)).color
+                    self.assertEqual(color.get_truecolor().hex, roles[role])
 
     def test_filters_are_composed_without_mutating_source_records(self):
         for name in ("ltui", "jtui", "sctui"):

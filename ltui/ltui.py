@@ -3096,13 +3096,15 @@ class LTUI(App):
         if blocked_by or blocks:
             m.append("\n")
             if blocked_by:
-                m.append("\uf056 ", style=C_RED)
-                m.append("blocked by " + " \u00b7 ".join(blocked_by), style=C_RED)
+                color = tracker_role_color("blocked", C_RED)
+                m.append("\uf056 ", style=color)
+                m.append("blocked by " + " \u00b7 ".join(blocked_by), style=color)
             if blocked_by and blocks:
                 m.append("   ")
             if blocks:
-                m.append("\uf06a ", style=C_PEACH)
-                m.append("blocks " + " \u00b7 ".join(blocks), style=C_PEACH)
+                color = tracker_role_color("blocking", C_PEACH)
+                m.append("\uf06a ", style=color)
+                m.append("blocks " + " \u00b7 ".join(blocks), style=color)
         m.append("\n")
         m.append(" ", style=C_DIM)
         m.append(

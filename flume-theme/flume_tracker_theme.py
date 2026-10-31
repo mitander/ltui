@@ -74,7 +74,7 @@ def _palette_theme(data: dict) -> dict:
         "initiative": "syntax_keyword",
         "label": "cyan",
         "blocked": "error",
-        "blocking": "warning",
+        "blocking": "syntax_type",
         "priority_urgent": "error",
     }
     fields = {
