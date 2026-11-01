@@ -2,7 +2,7 @@
 
 This checkout at `~/c/p/ltui` maintains personal ltui and jtui customizations
 on upstream `runpantheon/ltui` revision
-`59da9ba656a14e37989e98d3e18a9d948a3ae158`.
+`cc3a03641a70b6a034c4ae9b19b1f4a69f5d728e`.
 The upstream README describes stock behavior. This file describes the fork.
 Shortcut retains upstream behavior with local rendering refactors.
 Preserve upstream LICENSE, NOTICE, and attribution.
@@ -88,25 +88,32 @@ See `~/dotfiles/tracker-tui/README.md` for setup details.
 
 ## Maintain the fork
 
-`main` tracks `upstream/main` without personal changes. `flume-personal` carries
-the local commits. The `upstream` remote points to `runpantheon/ltui`; no personal
-`origin` remote is configured yet. Add `origin` when publishing your own fork.
-Do not push the personal branch to `upstream`.
+`main` is the maintained fork and the default branch on `mitander/ltui`.
+It tracks `origin/main`, including the personal changes. `upstream/main` is the
+clean upstream reference, so no separate local mirror branch is needed.
+The `origin` remote points to `mitander/ltui`. The `upstream` remote points to
+`runpantheon/ltui`. Push fork changes only to `origin`, never to `upstream`.
+The old `flume-personal` branch remains as a historical reference, not an active
+maintenance branch. Use short-lived branches for new changes.
 
 Update from a clean working tree:
 
 ```sh
-git switch flume-personal
+git switch main
+git fetch origin
+git merge --ff-only origin/main
 git fetch upstream
-git branch backup/flume-personal-before-update
-git rebase upstream/main
+git merge --no-ff upstream/main
 ```
 
-Use a new backup branch name for subsequent updates. Resolve conflicts by
-preserving both upstream behavior and the personal behavior documented above.
-Use `git rebase --abort` to cancel an update. Compare the old and new commit
-series with `git range-diff`, then run the checks below before publishing.
-After validation, update the clean mirror with `git branch -f main upstream/main`.
+Resolve conflicts by preserving both upstream behavior and the personal behavior
+documented above. Use `git merge --abort` to cancel an unfinished merge.
+Inspect the merge diff and run the checks below before publishing with
+`git push origin main`. Update the upstream revision at the top of this file
+when integrating upstream changes. Do not rebase or force-push published fork
+history. If the fast-forward from `origin/main` fails, inspect the divergence
+rather than resetting either side.
+
 Local editable installations use this checkout directly. Publishing is not required
 to try source changes.
 
