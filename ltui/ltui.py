@@ -1057,7 +1057,8 @@ class PickerModal(ModalScreen):
             yield NavList(*self._options, id="picker-list")
 
     def on_mount(self) -> None:
-        pop_in(self.query_one("#picker-box"))
+        # Container opacity animations leave cached intermediate backgrounds on
+        # Textual's title and option visuals, including the selected-row style.
         self.query_one("#picker-list").focus()
 
     @on(OptionList.OptionSelected)
