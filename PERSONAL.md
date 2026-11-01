@@ -10,7 +10,9 @@ Preserve upstream LICENSE, NOTICE, and attribution.
 ## Behavior
 
 - Load all four Flume palettes and follow the shared active-schema marker.
-- Map application chrome, workflow states, and identity colors to Flume roles.
+- Map application chrome, workflow states, and identity colors to Flume roles. Context uses purple,
+  controls and focused input cursors use the action accent, and secondary text uses readable muted
+  ink. Retained-ink focus rows stay on the quiet active-element surface.
 - Resolve CSS colors at theme-change time, not at module import.
 - Start with the sidebar hidden; `b` toggles and persists its visibility.
 - Prefer `TRACKER_SCOPE`, then `TRACKER_REPOSITORY`, for scope selection.
@@ -51,6 +53,8 @@ including All projects, takes precedence over inference and persists per
 checkout, workspace, and team. Select another project with `p` to change it.
 Status and grouping preferences persist independently. Old `focus` preferences
 are replaced by the Workflow status default on the first launch after upgrading.
+The top app header contains only ltui branding. Workspace, team and project context remain in the
+board title rather than repeating account and team labels above it.
 
 `f` offers Workflow (In Progress, Todo, Backlog, Done), Active (In Progress,
 Todo), All statuses, and each of the four workflow types individually. `v`

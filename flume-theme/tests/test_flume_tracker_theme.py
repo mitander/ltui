@@ -115,6 +115,8 @@ class FlumeTrackerThemeTests(unittest.TestCase):
                         "text",
                         "fg",
                         "syntax_comment",
+                        "muted",
+                        "magenta",
                         "border",
                         "border_variant",
                         "accent",
@@ -138,6 +140,10 @@ class FlumeTrackerThemeTests(unittest.TestCase):
                 "warning": "#aa5500",
                 "syntax_type": "#705883",
                 "error": "#9d395e",
+                "muted": "#a6a2bb",
+                "magenta": "#b99add",
+                "accent": "#7dacbb",
+                "on_accent": "#232136",
             },
         }
         path = self.themes / "flume-dusk.json"
@@ -151,6 +157,14 @@ class FlumeTrackerThemeTests(unittest.TestCase):
         self.assertEqual(roles["blocking"], "#705883")
         self.assertEqual(roles["blocked"], "#9d395e")
         self.assertEqual(roles["warning"], "#aa5500")
+        for role in ("team", "project", "initiative", "accent_secondary"):
+            self.assertEqual(roles[role], "#b99add")
+        self.assertEqual(roles["text_muted"], "#a6a2bb")
+        self.assertEqual(loaded[0].accent, "#7dacbb")
+        self.assertEqual(loaded[0].secondary, "#b99add")
+        self.assertEqual(loaded[0].variables["ltui-border-detail"], "#7dacbb")
+        self.assertEqual(loaded[0].variables["input-cursor-background"], "#7dacbb")
+        self.assertEqual(loaded[0].variables["input-cursor-foreground"], "#232136")
 
         palette["colors"]["bg"] = "#ded4d1"
         palette["appearance"] = "light"

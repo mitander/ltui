@@ -67,6 +67,26 @@ class RenderingPhaseTests(unittest.TestCase):
                     color = meta.get_style_at_offset(console, meta.plain.index(label)).color
                     self.assertEqual(color.get_truecolor().hex, roles[role])
 
+    def test_header_keeps_only_branding_without_account_or_workspace_context(self):
+        import ltui
+        from rich.text import Text
+
+        app = self.app("ltui")
+        header = Mock()
+        contexts = (
+            (None, None, None),
+            ("workspace", "viewer", None),
+            ("workspace", "viewer", {"id": "dev", "name": "dev", "key": "DEV"}),
+            ("workspace", "viewer", {"id": ltui.ALL_TEAMS_ID}),
+        )
+        for org, viewer, team in contexts:
+            with self.subTest(team=team):
+                app._org, app._viewer_name, app._team = org, viewer, team
+                with patch.object(app, "query_one", return_value=header):
+                    app._update_header()
+                markup = header.update.call_args.args[0]
+                self.assertEqual(Text.from_markup(markup).plain.strip(), "\uf03a ltui")
+
     def test_filters_are_composed_without_mutating_source_records(self):
         for name in ("ltui", "jtui", "sctui"):
             with self.subTest(app=name):

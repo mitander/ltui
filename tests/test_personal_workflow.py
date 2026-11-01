@@ -89,6 +89,22 @@ class PersonalWorkflowTests(unittest.IsolatedAsyncioTestCase):
                                     title.styles.color,
                                     module.TColor.parse(module.C_SUB),
                                 )
+                                self.assertEqual(module.C_DIM, data["colors"]["muted"])
+                                self.assertEqual(module.C_MAUVE, data["colors"]["magenta"])
+                                cursor = field.get_component_rich_style("input--cursor")
+                                self.assertEqual(
+                                    cursor.bgcolor.get_truecolor().hex,
+                                    data["colors"]["accent"],
+                                )
+                                self.assertEqual(
+                                    cursor.color.get_truecolor().hex,
+                                    data["colors"]["on_accent"],
+                                )
+                                board = app.screen_stack[0].query_one("#centre")
+                                self.assertEqual(
+                                    board.styles.border_title_color,
+                                    module.TColor.parse(data["colors"]["magenta"]),
+                                )
                                 self.assertEqual(
                                     field.styles.border_top[1],
                                     module.TColor.parse(module.C_FAINT),

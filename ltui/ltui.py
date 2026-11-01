@@ -1690,7 +1690,7 @@ class LTUI(App):
     #centre {{
         width: 1fr;
         border: round $ltui-border;
-        border-title-color: $tracker-text; border-subtitle-color: $tracker-dim;
+        border-title-color: $tracker-mauve; border-subtitle-color: $tracker-dim;
     }}
     #centre:focus-within {{ border: round $ltui-border-focus; }}
 
@@ -3193,20 +3193,9 @@ class LTUI(App):
                 pass
 
     def _update_header(self) -> None:
-        if self._org is None or self._viewer_name is None:
-            return
-        team = self._team
-        if team is None:
-            identity = self._org
-        elif team["id"] == ALL_TEAMS_ID:
-            identity = f"{self._org} \u00b7 all teams"
-        else:
-            identity = f"{team['name']} ({team['key']})"
         markup = (
             f"[bold {C_BLUE}] \uf03a [/]"
             + wave_markup("ltui", self._wave_pos, f"bold {C_BLUE}", C_LAV)
-            + f"[{C_VFAINT}]  \u00b7  [/][{C_SUB}]{escape(identity)}[/]"
-            + f"[{C_VFAINT}] / [/][{C_DIM}]{escape(self._viewer_name)}[/]"
         )
         self.query_one("#appheader", Static).update(markup)
 
