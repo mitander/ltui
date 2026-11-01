@@ -18,12 +18,19 @@ import os
 import re
 import subprocess
 import sys
-import tomllib
 import webbrowser
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
+import tomllib
+from flume_tracker_theme import (
+    active_flume_theme,
+    load_flume_themes,
+    theme_palette,
+    theme_roles,
+    watch_flume_theme_changes,
+)
 from rich.markup import escape
 from rich.text import Text
 from textual import on, work
@@ -33,7 +40,15 @@ from textual.color import Color as TColor
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.theme import Theme
-from textual.widgets import Button, Footer, Input, Markdown, OptionList, Static, TextArea
+from textual.widgets import (
+    Button,
+    Footer,
+    Input,
+    Markdown,
+    OptionList,
+    Static,
+    TextArea,
+)
 from textual.widgets.option_list import Option
 from textual.worker import WorkerState
 
@@ -64,32 +79,134 @@ C_RED = "#f38ba8"
 C_MAUVE = "#cba6f7"
 
 _PALETTE = dict(
-    C_TEXT=C_TEXT, C_SUB=C_SUB, C_DIM=C_DIM, C_FAINT=C_FAINT, C_VFAINT=C_VFAINT,
-    C_BLUE=C_BLUE, C_LAV=C_LAV, C_PEACH=C_PEACH, C_GREEN=C_GREEN, C_RED=C_RED,
+    C_TEXT=C_TEXT,
+    C_SUB=C_SUB,
+    C_DIM=C_DIM,
+    C_FAINT=C_FAINT,
+    C_VFAINT=C_VFAINT,
+    C_BLUE=C_BLUE,
+    C_LAV=C_LAV,
+    C_PEACH=C_PEACH,
+    C_GREEN=C_GREEN,
+    C_RED=C_RED,
     C_MAUVE=C_MAUVE,
 )
 _PALETTE_ANSI = dict(
-    C_TEXT="default", C_SUB="white", C_DIM="bright_black", C_FAINT="bright_black",
-    C_VFAINT="bright_black", C_BLUE="blue", C_LAV="bright_blue", C_PEACH="yellow",
-    C_GREEN="green", C_RED="red", C_MAUVE="magenta",
+    C_TEXT="default",
+    C_SUB="white",
+    C_DIM="bright_black",
+    C_FAINT="bright_black",
+    C_VFAINT="bright_black",
+    C_BLUE="blue",
+    C_LAV="bright_blue",
+    C_PEACH="yellow",
+    C_GREEN="green",
+    C_RED="red",
+    C_MAUVE="magenta",
 )
 
 
-def set_palette(ansi: bool) -> None:
-    """Swap the chrome palette; `system` draws it in terminal ANSI colors."""
-    globals().update(_PALETTE_ANSI if ansi else _PALETTE)
+_TRACKER_ROLES: dict[str, str] = {}
+
+
+def set_palette(theme: str) -> None:
+    """Swap the chrome palette for built-in, ANSI, or Flume themes."""
+    roles = theme_roles(theme) or {}
+    globals()["_TRACKER_ROLES"] = roles
+    globals().update(
+        theme_palette(theme) or (_PALETTE_ANSI if theme == "system" else _PALETTE)
+    )
+
+
+def tracker_role_color(role: str, fallback: str | None = None) -> str:
+    """Resolve a deliberately assigned tracker role in the active theme."""
+    return _TRACKER_ROLES.get(role, fallback or C_SUB)
+
+
+def tracker_state_color(state: dict) -> str:
+    """Map workflow semantics onto deliberately assigned Flume roles."""
+    role = {
+        "triage": "status_triage",
+        "started": "status_started",
+        "unstarted": "status_unstarted",
+        "backlog": "status_backlog",
+        "completed": "status_completed",
+        "canceled": "status_canceled",
+        "duplicate": "status_canceled",
+    }.get(state.get("type"))
+    return tracker_role_color(role, C_SUB) if role else C_SUB
+
+
+def preferred_tracker_scope(scopes: list[dict]) -> dict | None:
+    """Choose the scope matching repo config, issue branch, or repository name."""
+
+    def token(value: object) -> str:
+        return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
+
+    explicit = token(os.environ.get("TRACKER_SCOPE"))
+    repository = token(os.environ.get("TRACKER_REPOSITORY"))
+    for hint, fuzzy in ((explicit, False), (repository, True)):
+        if not hint:
+            continue
+        for scope in scopes:
+            candidates = (token(scope.get("key")), token(scope.get("name")))
+            if hint in candidates or (
+                fuzzy
+                and len(hint) >= 4
+                and any(hint in value or value in hint for value in candidates)
+            ):
+                return scope
+    return None
+
+
+def repository_context() -> Path:
+    """Use the checkout root, even when launched from a nested directory."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=True,
+        )
+        return Path(result.stdout.strip()).resolve()
+    except (OSError, subprocess.SubprocessError):
+        return Path.cwd().resolve()
+
+
+def matching_project(projects: list[dict], repository: Path) -> dict | None:
+    """Only a unique normalized name or explicit ID is safe to select."""
+    hint = (
+        os.environ.get("TRACKER_PROJECT")
+        or os.environ.get("TRACKER_REPOSITORY")
+        or repository.name
+    )
+
+    def normalize(value: str) -> str:
+        return "".join(character for character in value.casefold() if character.isalnum())
+
+    matches = [
+        project
+        for project in projects
+        if project["id"] == hint or normalize(project["name"]) == normalize(hint)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
 
 # ── themes ────────────────────────────────────────────────────────────────
-_ACCENTS = dict(
-    success=C_GREEN, warning="#f9e2af", error=C_RED, dark=True
-)
+_ACCENTS = dict(success=C_GREEN, warning="#f9e2af", error=C_RED, dark=True)
 
 THEMES = [
     Theme(
         name="mocha",
-        primary=C_BLUE, secondary=C_MAUVE, accent="#f5c2e7",
-        background="#1e1e2e", surface="#313244", panel="#181825",
-        foreground=C_TEXT, **_ACCENTS,
+        primary=C_BLUE,
+        secondary=C_MAUVE,
+        accent="#f5c2e7",
+        background="#1e1e2e",
+        surface="#313244",
+        panel="#181825",
+        foreground=C_TEXT,
+        **_ACCENTS,
         variables={
             "ltui-border": "#45475a",
             "ltui-border-focus": C_BLUE,
@@ -107,9 +224,14 @@ THEMES = [
     ),
     Theme(
         name="void",
-        primary=C_BLUE, secondary=C_MAUVE, accent="#f5c2e7",
-        background="#000000", surface="#101018", panel="#070709",
-        foreground=C_TEXT, **_ACCENTS,
+        primary=C_BLUE,
+        secondary=C_MAUVE,
+        accent="#f5c2e7",
+        background="#000000",
+        surface="#101018",
+        panel="#070709",
+        foreground=C_TEXT,
+        **_ACCENTS,
         variables={
             "ltui-border": "#26262e",
             "ltui-border-focus": C_BLUE,
@@ -127,9 +249,14 @@ THEMES = [
     ),
     Theme(
         name="onyx",
-        primary="#9aa5b5", secondary="#7d8494", accent="#b8c0cc",
-        background="#0e0e11", surface="#1b1b20", panel="#131317",
-        foreground="#d4d6dd", **_ACCENTS,
+        primary="#9aa5b5",
+        secondary="#7d8494",
+        accent="#b8c0cc",
+        background="#0e0e11",
+        surface="#1b1b20",
+        panel="#131317",
+        foreground="#d4d6dd",
+        **_ACCENTS,
         variables={
             "ltui-border": "#33333c",
             "ltui-border-focus": "#9aa5b5",
@@ -149,9 +276,14 @@ THEMES = [
     # blur/transparency it has) shows through
     Theme(
         name="clear",
-        primary="#8a93a5", secondary="#6f7787", accent="#a9b1c0",
-        background="ansi_default", surface="ansi_default", panel="ansi_default",
-        foreground=C_TEXT, **_ACCENTS,
+        primary="#8a93a5",
+        secondary="#6f7787",
+        accent="#a9b1c0",
+        background="ansi_default",
+        surface="ansi_default",
+        panel="ansi_default",
+        foreground=C_TEXT,
+        **_ACCENTS,
         variables={
             "ltui-border": "#3c3f4a",
             "ltui-border-focus": "#8a93a5",
@@ -171,10 +303,17 @@ THEMES = [
     # alacritty theme becomes the ltui theme
     Theme(
         name="system",
-        primary="ansi_blue", secondary="ansi_magenta", accent="ansi_cyan",
-        background="ansi_default", surface="ansi_default", panel="ansi_default",
+        primary="ansi_blue",
+        secondary="ansi_magenta",
+        accent="ansi_cyan",
+        background="ansi_default",
+        surface="ansi_default",
+        panel="ansi_default",
         foreground="ansi_default",
-        success="ansi_green", warning="ansi_yellow", error="ansi_red", dark=True,
+        success="ansi_green",
+        warning="ansi_yellow",
+        error="ansi_red",
+        dark=True,
         variables={
             "ltui-border": "ansi_bright_black",
             "ltui-border-focus": "ansi_blue",
@@ -192,6 +331,12 @@ THEMES = [
         },
     ),
 ]
+THEMES += load_flume_themes("ltui")
+for _theme in THEMES:
+    _chrome = theme_palette(_theme.name) or _PALETTE
+    for _key, _value in _chrome.items():
+        _variable = "tracker-" + _key.removeprefix("C_").lower().replace("_", "-")
+        _theme.variables.setdefault(_variable, _value)
 THEME_NAMES = [t.name for t in THEMES]
 
 TYPE_RANK = {
@@ -214,7 +359,19 @@ INITIATIVE_RANK = {
     "Canceled": 4,
 }
 
-GROUP_MODES = ["status", "project", "initiative"]
+GROUP_MODES = ["status", "project", "milestone", "initiative"]
+STATUS_FILTERS = {
+    "workflow": (
+        "Workflow: In Progress / Todo / Backlog / Done",
+        {"started", "unstarted", "backlog", "completed"},
+    ),
+    "active": ("Active: In Progress / Todo", {"started", "unstarted"}),
+    "all": ("All statuses", None),
+    "started": ("In Progress only", {"started"}),
+    "unstarted": ("Todo only", {"unstarted"}),
+    "backlog": ("Backlog only", {"backlog"}),
+    "completed": ("Done only", {"completed"}),
+}
 
 # the due-date column takes 8 columns off the title. Below this list width —
 # roughly a half-screen list with the detail panel open — the title has none to
@@ -230,13 +387,14 @@ ALL_TEAMS = {"id": ALL_TEAMS_ID, "key": "ALL", "name": "all teams", "color": Non
 # ── graphql ───────────────────────────────────────────────────────────────
 ISSUE_FIELDS = """
         id identifier title description url priority branchName dueDate
-        updatedAt createdAt
+        updatedAt createdAt sortOrder
         state { id name color type position }
         assignee { id displayName }
         labels(first: 6) { nodes { id name color } }
         relations(first: 6) { nodes { type relatedIssue { identifier } } }
         inverseRelations(first: 6) { nodes { type issue { identifier } } }
         project { id name color }
+        projectMilestone { id name targetDate }
         parent { identifier }
         team { id name key color }
 """
@@ -249,9 +407,10 @@ query {
 }"""
 
 QL_ISSUES = f"""
-query($teamId: String!) {{
+query($teamId: String!, $after: String) {{
   team(id: $teamId) {{
-    issues(first: 250, orderBy: updatedAt) {{
+    issues(first: 50, after: $after, orderBy: updatedAt) {{
+      pageInfo {{ hasNextPage endCursor }}
       nodes {{ {ISSUE_FIELDS} }}
     }}
     states {{ nodes {{ id name color type position }} }}
@@ -391,17 +550,19 @@ DEFAULT_KEYBINDS = {
     "add_comment": (["c"], "comment"),
     "filter": (["slash"], "filter"),
     "toggle_mine": (["m"], "mine"),
+    "toggle_focus": (["f"], "statuses"),
     "toggle_group": (["v"], "group"),
-    "pick_project": (["V"], None),
+    "toggle_sidebar": (["b"], None),
+    "pick_project": (["p", "V"], "project"),
     "cycle_theme": (["t"], "theme"),
     "open_settings": (["comma"], None),
     "help": (["question_mark"], "help"),
     "quit": (["q"], "quit"),
     "refresh": (["r"], None),
-    "change_priority": (["p"], None),
+    "change_priority": (["P"], None),
     "change_due_date": (["d"], None),
     "edit_labels": (["l"], None),
-    "move_project": (["P"], None),
+    "move_project": (["M"], None),
     "change_assignee": (["a"], None),
     "open_browser": (["o"], None),
     "yank": (["y"], None),
@@ -420,14 +581,20 @@ def build_bindings(user_keybinds: dict | None = None) -> list:
     """App bindings from defaults + config.json overrides. Fail-safe: a bad
     config falls back to the defaults for the affected action."""
     merged: dict[str, tuple[list, str | None]] = {}
-    user_keybinds = user_keybinds if user_keybinds is not None else (
-        USER_CONFIG.get("keybinds", {}) if isinstance(USER_CONFIG, dict) else {}
+    user_keybinds = (
+        user_keybinds
+        if user_keybinds is not None
+        else (USER_CONFIG.get("keybinds", {}) if isinstance(USER_CONFIG, dict) else {})
     )
     for action, (keys, label) in DEFAULT_KEYBINDS.items():
         custom = user_keybinds.get(action)
         if isinstance(custom, str):
             keys = [custom]
-        elif isinstance(custom, list) and all(isinstance(k, str) for k in custom) and custom:
+        elif (
+            isinstance(custom, list)
+            and all(isinstance(k, str) for k in custom)
+            and custom
+        ):
             keys = custom
         merged[action] = (keys, label)
     bindings = [Binding("escape", "back", show=False)]
@@ -439,6 +606,7 @@ def build_bindings(user_keybinds: dict | None = None) -> list:
                     action,
                     label or "",
                     show=bool(label) and i == 0,
+                    priority=action == "toggle_sidebar",
                 )
             )
     return bindings
@@ -451,17 +619,19 @@ CONFIG_TEMPLATE = """{
     "add_comment": "c",
     "filter": "slash",
     "toggle_mine": "m",
+    "toggle_focus": "f",
     "toggle_group": "v",
-    "pick_project": "V",
+    "toggle_sidebar": "b",
+    "pick_project": ["p", "V"],
     "cycle_theme": "t",
     "open_settings": "comma",
     "help": "question_mark",
     "quit": "q",
     "refresh": "r",
-    "change_priority": "p",
+    "change_priority": "P",
     "change_due_date": "d",
     "edit_labels": "l",
-    "move_project": "P",
+    "move_project": "M",
     "change_assignee": "a",
     "open_browser": "o",
     "yank": "y",
@@ -506,9 +676,7 @@ async def verify_key(key: str) -> str:
     ) as client:
         resp = await client.post(
             API_URL,
-            json={
-                "query": "query { viewer { displayName } organization { name } }"
-            },
+            json={"query": "query { viewer { displayName } organization { name } }"},
         )
         data = resp.json()
         if data.get("errors"):
@@ -557,7 +725,7 @@ def state_icon(state: dict) -> str:
 def priority_cell(p: int) -> Text:
     t = Text()
     if p == 1:
-        t.append(" ", style=f"bold {C_PEACH}")
+        t.append(" ", style=f"bold {tracker_role_color('priority_urgent', C_PEACH)}")
         t.append("  ")
     elif p in (2, 3, 4):
         lit = {2: 3, 3: 2, 4: 1}[p]
@@ -629,8 +797,8 @@ def state_sort_key(s: dict):
 
 
 def issue_sort_key(i: dict):
-    # most recently updated first within each status group
-    return (-parse_dt(i["updatedAt"]).timestamp(),)
+    rank = i.get("sortOrder")
+    return (rank is None, rank if rank is not None else 0, i["identifier"])
 
 
 def initiative_sort_key(init: dict):
@@ -751,6 +919,16 @@ class NavList(OptionList):
                 if not self.get_option_at_index(j).disabled:
                     self.highlighted = j
                     return
+
+    def scroll_to_highlight(self, top: bool = False) -> None:
+        super().scroll_to_highlight(top=top)
+        index = self.highlighted
+        if (
+            index is not None
+            and index > 0
+            and all(self.get_option_at_index(n).disabled for n in range(index))
+        ):
+            self.scroll_home(animate=False)
 
     def action_first(self) -> None:
         """Jump to the top of the list, not just to the first *option*.
@@ -879,7 +1057,8 @@ class PickerModal(ModalScreen):
             yield NavList(*self._options, id="picker-list")
 
     def on_mount(self) -> None:
-        pop_in(self.query_one("#picker-box"))
+        # Container opacity animations leave cached intermediate backgrounds on
+        # Textual's title and option visuals, including the selected-row style.
         self.query_one("#picker-list").focus()
 
     @on(OptionList.OptionSelected)
@@ -1136,7 +1315,10 @@ class ThemeModal(ModalScreen):
 
     def _row(self, name: str, active: str) -> Option:
         row = Text("  ")
-        row.append("\u25cf " if name == active else "\u25cb ", style=C_BLUE if name == active else C_DIM)
+        row.append(
+            "\u25cf " if name == active else "\u25cb ",
+            style=C_BLUE if name == active else C_DIM,
+        )
         row.append(name, style=C_TEXT if name == active else C_SUB)
         return Option(row, id=name)
 
@@ -1220,7 +1402,7 @@ class LabelsModal(ModalScreen):
             row.append("\uf00c " if on_it else "  ", style=C_GREEN)
             if not on_it:
                 row.append(" ")
-            row.append("\u25cf ", style=lb.get("color") or C_DIM)
+            row.append("\u25cf ", style=tracker_role_color("label", C_DIM))
             row.append(lb["name"], style=C_TEXT if on_it else C_SUB)
             opts.append(Option(row, id=lb["id"]))
         ol.add_options(opts)
@@ -1257,9 +1439,7 @@ class ProjectNameModal(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="projname-box"):
-            yield Static(
-                f"[bold {C_SUB}]\uf07b new project[/]", id="projname-title"
-            )
+            yield Static(f"[bold {C_SUB}]\uf07b new project[/]", id="projname-title")
             yield Input(placeholder="project name", id="projname-input")
             yield Static(
                 f"[{C_DIM}]enter creates \u00b7 esc cancels[/]", id="projname-hint"
@@ -1293,7 +1473,9 @@ class SettingsModal(ModalScreen):
         app = self.app
         profile = Text()
         profile.append(" ", style=C_BLUE)
-        profile.append(getattr(app, "_viewer_name", None) or "…", style=f"bold {C_TEXT}")
+        profile.append(
+            getattr(app, "_viewer_name", None) or "…", style=f"bold {C_TEXT}"
+        )
         org = getattr(app, "_org", None)
         if org:
             profile.append(f"  ·  {org}", style=C_DIM)
@@ -1363,10 +1545,10 @@ class HelpModal(ModalScreen):
         ("ticket", [
             ("n", "new ticket in the current team"),
             ("s", "change status"),
-            ("p", "change priority"),
+            ("P", "change priority"),
             ("d", "set or clear due date"),
             ("l", "edit labels"),
-            ("P", "move to a project (or create one)"),
+            ("M", "move to a project (or create one)"),
             ("a", "change assignee (or unassign)"),
             ("c", "add a comment (ctrl+s to send)"),
             ("y", "yank — copy branch / url / identifier"),
@@ -1376,8 +1558,10 @@ class HelpModal(ModalScreen):
         ("view", [
             ("/", "filter issues"),
             ("m", "toggle mine only"),
-            ("v", "group by status / project / initiative"),
-            ("V", "filter to a single project"),
+            ("f", "choose status filter"),
+            ("b", "toggle team sidebar"),
+            ("v", "choose grouping (status by default)"),
+            ("p / V", "choose project"),
             ("t", "cycle theme"),
             (",", "settings"),
             ("r", "refresh"),
@@ -1469,7 +1653,7 @@ class WelcomeModal(ModalScreen):
 def hint_markup() -> str:
     return (
         f"[@click=app.change_status][{C_BLUE}]s[/] [{C_DIM}]status[/][/]  "
-        f"[@click=app.change_priority][{C_BLUE}]p[/] [{C_DIM}]priority[/][/]  "
+        f"[@click=app.change_priority][{C_BLUE}]P[/] [{C_DIM}]priority[/][/]  "
         f"[@click=app.change_due_date][{C_BLUE}]d[/] [{C_DIM}]due[/][/]  "
         f"[@click=app.add_comment][{C_BLUE}]c[/] [{C_DIM}]comment[/][/]  "
         f"[@click=app.open_browser][{C_BLUE}]o[/] [{C_DIM}]browser[/][/]  "
@@ -1496,25 +1680,25 @@ class LTUI(App):
     #split-right.open {{ display: block; }}
     #teams {{
         height: 1fr;
-        border: round $ltui-border; border-title-color: {C_SUB};
+        border: round $ltui-border; border-title-color: $tracker-sub;
     }}
     #teams:focus {{ border: round $ltui-border-focus; border-title-color: $ltui-border-focus; }}
     #profile {{
         height: auto; padding: 0 1;
-        border: round $ltui-border; border-title-color: {C_SUB};
+        border: round $ltui-border; border-title-color: $tracker-sub;
     }}
 
     #centre {{
         width: 1fr;
         border: round $ltui-border;
-        border-title-color: {C_TEXT}; border-subtitle-color: {C_DIM};
+        border-title-color: $tracker-mauve; border-subtitle-color: $tracker-dim;
     }}
     #centre:focus-within {{ border: round $ltui-border-focus; }}
 
     #detail {{
         display: none; width: 46%; min-width: 44;
         border: round $ltui-border;
-        border-title-color: $ltui-border-detail; border-subtitle-color: {C_DIM};
+        border-title-color: $ltui-border-detail; border-subtitle-color: $tracker-dim;
     }}
     #detail.open {{ display: block; }}
     #detail:focus-within {{ border: round $ltui-border-detail; }}
@@ -1523,7 +1707,8 @@ class LTUI(App):
         background: transparent; border: none; padding: 0 1;
         scrollbar-size-vertical: 1;
     }}
-    OptionList:focus {{ background: transparent; border: none; }}
+    OptionList:focus {{ background: transparent; background-tint: transparent; border: none; }}
+    OptionList > .option-list--option-disabled {{ text-opacity: 100%; text-style: not dim; }}
     OptionList > .option-list--option-highlighted {{ background: $ltui-cursor; }}
     OptionList:focus > .option-list--option-highlighted {{ background: $ltui-cursor; }}
 
@@ -1548,7 +1733,7 @@ class LTUI(App):
     #d-comments-head {{ padding: 1 1 0 1; }}
     #d-comments {{ height: auto; }}
     .comment {{
-        height: auto; border-left: thick {C_VFAINT};
+        height: auto; border-left: thick $tracker-vfaint;
         padding: 0 1; margin: 1 1 0 1;
     }}
     .comment-meta {{ height: auto; }}
@@ -1560,7 +1745,7 @@ class LTUI(App):
         width: 44; height: auto; max-height: 80%;
         background: $ltui-modal-bg; border: round $ltui-border-focus; padding: 1 1;
     }}
-    #picker-title {{ padding: 0 1 1 1; color: {C_SUB}; text-style: bold; }}
+    #picker-title {{ padding: 0 1 1 1; color: $tracker-sub; text-style: bold; }}
     #picker-list {{ height: auto; max-height: 14; }}
 
     DueDateModal {{ align: center middle; background: $ltui-overlay; }}
@@ -1568,9 +1753,9 @@ class LTUI(App):
         width: 60; max-width: 90%; height: auto;
         background: $ltui-modal-bg; border: round $ltui-border-focus; padding: 1 2;
     }}
-    #duedate-title {{ color: {C_SUB}; text-style: bold; padding: 0 0 1 0; }}
-    #duedate-input {{ border: round {C_VFAINT}; background: transparent; }}
-    #duedate-input:focus {{ border: round {C_FAINT}; }}
+    #duedate-title {{ color: $tracker-sub; text-style: bold; padding: 0 0 1 0; }}
+    #duedate-input {{ border: round $tracker-vfaint; background: transparent; }}
+    #duedate-input:focus {{ border: round $tracker-faint; }}
     #duedate-presets {{ height: 3; margin: 1 0 0 0; }}
     /* a Button's default min-width is wider than a third of the box, and an fr
        child that cannot shrink to its share takes the whole row instead — which
@@ -1586,7 +1771,7 @@ class LTUI(App):
         width: 46; height: auto; max-height: 80%;
         background: $ltui-modal-bg; border: round $ltui-border-focus; padding: 1 1;
     }}
-    #labels-title {{ padding: 0 1 1 1; color: {C_SUB}; text-style: bold; }}
+    #labels-title {{ padding: 0 1 1 1; color: $tracker-sub; text-style: bold; }}
     #labels-list {{ height: auto; max-height: 14; }}
     #labels-actions {{ height: 3; margin: 1 0 0 0; }}
     #labels-hint {{ width: 1fr; padding: 1 1; }}
@@ -1598,17 +1783,17 @@ class LTUI(App):
         background: $ltui-modal-bg; border: round $ltui-border-focus; padding: 1 2;
     }}
     #projname-title {{ padding: 0 0 1 0; }}
-    #projname-input {{ border: round {C_VFAINT}; background: transparent; }}
-    #projname-input:focus {{ border: round {C_FAINT}; }}
+    #projname-input {{ border: round $tracker-vfaint; background: transparent; }}
+    #projname-input:focus {{ border: round $tracker-faint; }}
     #projname-hint {{ padding: 1 0 0 0; }}
 
     #comment-box {{
         width: 72; height: 20;
         background: $ltui-modal-bg; border: round $ltui-border-focus; padding: 1 2;
     }}
-    #comment-title {{ color: {C_SUB}; text-style: bold; padding: 0 0 1 0; }}
-    #comment-input {{ height: 1fr; border: round {C_VFAINT}; background: transparent; }}
-    #comment-input:focus {{ border: round {C_FAINT}; }}
+    #comment-title {{ color: $tracker-sub; text-style: bold; padding: 0 0 1 0; }}
+    #comment-input {{ height: 1fr; border: round $tracker-vfaint; background: transparent; }}
+    #comment-input:focus {{ border: round $tracker-faint; }}
     #comment-actions {{ height: 3; margin: 1 0 0 0; }}
     #comment-hint {{ width: 1fr; padding: 1 0; }}
     #comment-actions Button {{ margin: 0 0 0 2; min-width: 10; }}
@@ -1618,11 +1803,11 @@ class LTUI(App):
         width: 72; height: 24;
         background: $ltui-modal-bg; border: round $ltui-border-focus; padding: 1 2;
     }}
-    #ticket-heading {{ color: {C_SUB}; text-style: bold; padding: 0 0 1 0; }}
-    #ticket-title {{ border: round {C_VFAINT}; background: transparent; }}
-    #ticket-title:focus {{ border: round {C_FAINT}; }}
-    #ticket-desc {{ height: 1fr; margin: 1 0 0 0; border: round {C_VFAINT}; background: transparent; }}
-    #ticket-desc:focus {{ border: round {C_FAINT}; }}
+    #ticket-heading {{ color: $tracker-sub; text-style: bold; padding: 0 0 1 0; }}
+    #ticket-title {{ border: round $tracker-vfaint; background: transparent; }}
+    #ticket-title:focus {{ border: round $tracker-faint; }}
+    #ticket-desc {{ height: 1fr; margin: 1 0 0 0; border: round $tracker-vfaint; background: transparent; }}
+    #ticket-desc:focus {{ border: round $tracker-faint; }}
     #ticket-actions {{ height: 3; margin: 1 0 0 0; }}
     #ticket-hint {{ width: 1fr; padding: 1 0; }}
     #ticket-actions Button {{ margin: 0 0 0 2; min-width: 10; }}
@@ -1634,8 +1819,8 @@ class LTUI(App):
     }}
     #onboard-title {{ padding: 0 0 1 0; }}
     #onboard-body {{ padding: 0 0 1 0; }}
-    #onboard-key {{ border: round {C_VFAINT}; background: transparent; }}
-    #onboard-key:focus {{ border: round {C_FAINT}; }}
+    #onboard-key {{ border: round $tracker-vfaint; background: transparent; }}
+    #onboard-key:focus {{ border: round $tracker-faint; }}
     #onboard-status {{ height: 1; padding: 0 1; margin: 1 0 0 0; }}
     #onboard-actions {{ height: 3; margin: 1 0 0 0; }}
     #onboard-hint {{ width: 1fr; }}
@@ -1646,7 +1831,7 @@ class LTUI(App):
         width: 40; height: auto; max-height: 85%;
         background: $ltui-modal-bg; border: round $ltui-border-focus; padding: 1 1;
     }}
-    #theme-title {{ padding: 0 1 1 1; color: {C_SUB}; text-style: bold; }}
+    #theme-title {{ padding: 0 1 1 1; color: $tracker-sub; text-style: bold; }}
     #theme-list {{ height: auto; max-height: 18; }}
 
     SettingsModal {{ align: center middle; background: $ltui-overlay; }}
@@ -1694,6 +1879,11 @@ class LTUI(App):
         self._boot_data: dict | None = None
         self._org: str | None = None
         self._mine = load_state().get("mine", False)
+        self._status_filter = load_state().get("status_filter", "workflow")
+        if self._status_filter not in STATUS_FILTERS:
+            self._status_filter = "workflow"
+        self._repository = repository_context()
+        self._project_choice_key: tuple[str | None, str | None] | None = None
         self._group_by = load_state().get("group_by", "status")
         if self._group_by not in GROUP_MODES:
             self._group_by = "status"
@@ -1716,7 +1906,7 @@ class LTUI(App):
     def _on_theme_changed(self, _theme) -> None:
         # ansi-background themes (clear, ansi-dark, …) need ansi_color mode
         # so default-color codes pass through and the terminal bg shows
-        set_palette(self.theme == "system")
+        set_palette(self.theme)
         self.ansi_color = self._theme_is_ansi()
         if self._boot_data is not None:
             self._render_boot(self._boot_data)
@@ -1779,18 +1969,28 @@ class LTUI(App):
                 yield Static(hint_markup(), id="d-hint")
         yield Footer()
 
+    @work(exclusive=True, group="flume-theme")
+    async def watch_flume_theme(self) -> None:
+        async for theme in watch_flume_theme_changes():
+            if theme in self.available_themes and theme != self.theme:
+                self.theme = theme
+
     def on_mount(self) -> None:
         for t in THEMES:
             self.register_theme(t)
         self.theme_changed_signal.subscribe(self, self._on_theme_changed)
-        saved = load_state().get("theme")
+        saved = active_flume_theme() or load_state().get("theme")
         self.theme = saved if saved in self.available_themes else THEME_NAMES[0]
+        set_palette(self.theme)
         self.ansi_color = self._theme_is_ansi()
+        self.watch_flume_theme()
         layout = load_state()
+        self._sidebar_hidden = bool(layout.get("sidebar_hidden", True))
         if w := layout.get("sidebar_w"):
             self.query_one("#sidebar").styles.width = int(w)
         if w := layout.get("detail_w"):
             self.query_one("#detail").styles.width = int(w)
+        self._apply_sidebar_visibility()
         self.query_one("#teams").border_title = " teams "
         self.query_one("#profile").border_title = " you "
         self.query_one("#centre").border_title = " issues "
@@ -1800,6 +2000,7 @@ class LTUI(App):
         try:
             key = load_api_key()
         except Exception:
+
             def connected(new_key: str | None) -> None:
                 if not new_key:
                     return
@@ -1822,10 +2023,7 @@ class LTUI(App):
         scope = None
         if boot_cache := read_cache("boot"):
             self._render_boot(boot_cache)
-            last_id = load_state().get("team_id")
-            scope = next(
-                (t for t in self._sidebar_scopes() if t["id"] == last_id), None
-            )
+            scope = preferred_tracker_scope(self._sidebar_scopes())
         if scope is not None:
             idx = self._scope_index(scope["id"])
             if idx is not None:
@@ -1902,7 +2100,7 @@ class LTUI(App):
                 row.append(t["name"], style=C_TEXT)
                 row.append(f"  {len(self._teams)}", style=C_DIM)
             else:
-                row.append("● ", style=t.get("color") or C_BLUE)
+                row.append("● ", style=tracker_role_color("team", C_BLUE))
                 row.append(t["name"], style=C_TEXT)
                 row.append(f"  {t['key']}", style=C_DIM)
             teams_list.add_option(Option(row, id=t["id"]))
@@ -1925,7 +2123,6 @@ class LTUI(App):
             return
         self._render_boot(data)
         write_cache("boot", data)
-        self.load_initiatives(rerender=True)
         if not pick_team:
             return
         if self._team is not None:
@@ -1934,19 +2131,36 @@ class LTUI(App):
             # them back to the remembered one (both loaders share the exclusive
             # "issues" worker group, so doing so would cancel theirs)
             return
-        last = load_state().get("team_id")
         scopes = self._sidebar_scopes()
-        scope = next((t for t in scopes if t["id"] == last), None) or (
-            self._teams[0] if self._teams else None
-        )
+        scope = preferred_tracker_scope(scopes)
         if scope is None:
-            issues_list.loading = False
-            self.notify("no teams found", severity="warning")
+            if not self._teams:
+                issues_list.loading = False
+                self.notify("no teams found", severity="warning")
+                return
+            self._sidebar_hidden = False
+            self._apply_sidebar_visibility()
+            self.query_one("#teams", NavList).focus()
             return
         idx = self._scope_index(scope["id"])
         if idx is not None:
             self.query_one("#teams", NavList).highlighted = idx
         self._load_scope(scope)
+
+    def _apply_sidebar_visibility(self) -> None:
+        display = "none" if self._sidebar_hidden else "block"
+        self.query_one("#sidebar").styles.display = display
+        self.query_one("#split-left").styles.display = display
+        if self._sidebar_hidden and getattr(self.focused, "id", None) in {
+            "teams",
+            "profile",
+        }:
+            self.query_one("#issues", NavList).focus()
+
+    def action_toggle_sidebar(self) -> None:
+        self._sidebar_hidden = not self._sidebar_hidden
+        self._apply_sidebar_visibility()
+        self._save_state()
 
     def _save_layout(self, reset: str | None = None) -> None:
         data = load_state()
@@ -1968,6 +2182,8 @@ class LTUI(App):
         data["mine"] = self._mine
         data["theme"] = self.theme
         data["group_by"] = self._group_by
+        data["status_filter"] = self._status_filter
+        data["sidebar_hidden"] = self._sidebar_hidden
         save_state(data)
 
     @property
@@ -2033,8 +2249,31 @@ class LTUI(App):
         self._issues = issues
         self._states = states
         self._issue_by_id = {i["id"]: i for i in issues}
+        self._resolve_project_filter()
         if self._team is not None and not self._all_teams:
             self._states_by_team[self._team["id"]] = states
+
+    def _resolve_project_filter(self) -> None:
+        # Scope preferences to workspace, team, and checkout. A manual choice
+        # wins over inference and survives refreshes, including an empty project.
+        key = (self._org, self._scope_id())
+        if key == self._project_choice_key:
+            return
+        self._project_filter = None
+        self._project_choice_key = None
+        choices = load_state().get("project_choices", {})
+        choice_key = json.dumps([*key, str(self._repository)])
+        if choice_key in choices:
+            self._project_filter = choices[choice_key]
+            self._project_choice_key = key
+            return
+        projects = {
+            issue["project"]["id"]: issue["project"]
+            for issue in self._issues if issue.get("project")
+        }
+        project = matching_project(list(projects.values()), self._repository)
+        if project is not None:
+            self._project_filter = project["id"]
 
     def _set_initiatives(self, nodes: list[dict]) -> None:
         self._initiatives = sorted(nodes, key=initiative_sort_key)
@@ -2061,9 +2300,31 @@ class LTUI(App):
         if rerender and self._group_by == "initiative":
             self.render_issues()
 
+    async def fetch_team_issues(self, team_id: str) -> dict:
+        after = None
+        collected_issues = []
+        seen_cursors = set()
+        while True:
+            data = await self.gql(QL_ISSUES, {"teamId": team_id, "after": after})
+            connection = data["team"]["issues"]
+            collected_issues.extend(connection["nodes"])
+            page = connection["pageInfo"]
+            if not page["hasNextPage"]:
+                # Later pages replace duplicate records without moving the
+                # first occurrence's position. Publish only a complete queue.
+                connection["nodes"] = list(
+                    {issue["id"]: issue for issue in collected_issues}.values()
+                )
+                return data
+            after = page["endCursor"]
+            if not after or after in seen_cursors:
+                raise RuntimeError("Linear issue pagination did not advance")
+            seen_cursors.add(after)
+
     @work(exclusive=True, group="issues")
     async def load_team(self, team: dict) -> None:
         self._team = team
+        self._update_header()
         centre = self.query_one("#centre")
         centre.border_title = f" {team['key']} · {team['name']} "
         centre.border_subtitle = ""
@@ -2078,7 +2339,7 @@ class LTUI(App):
             issues_list.loading = True
         self._save_state()
         try:
-            data = await self.gql(QL_ISSUES, {"teamId": team["id"]})
+            data = await self.fetch_team_issues(team["id"])
         except Exception as e:
             issues_list.loading = False
             self._refreshing = False
@@ -2113,8 +2374,12 @@ class LTUI(App):
     def _stamp_team(issues: list[dict], team: dict) -> list[dict]:
         # caches written before issues carried a team still need one, and the
         # all-teams board is the only place the answer isn't implicit
-        slim = {"id": team["id"], "name": team["name"], "key": team["key"],
-                "color": team.get("color")}
+        slim = {
+            "id": team["id"],
+            "name": team["name"],
+            "key": team["key"],
+            "color": team.get("color"),
+        }
         for i in issues:
             if not (i.get("team") or {}).get("id"):
                 i["team"] = slim
@@ -2143,11 +2408,12 @@ class LTUI(App):
 
         Fans the existing per-team query out concurrently rather than using
         Linear's workspace-wide issues query: it costs the same wall-clock,
-        returns 250 issues *per team* instead of 250 in total, and keeps the
+        paginates every team instead of truncating the queue, and keeps the
         per-team disk caches — and the team-scoped workflow states that
         mutations need — intact.
         """
         self._team = ALL_TEAMS
+        self._update_header()
         teams = list(self._teams)
         centre = self.query_one("#centre")
         centre.border_title = f" ALL · {len(teams)} teams "
@@ -2172,7 +2438,7 @@ class LTUI(App):
         self._save_state()
 
         results = await asyncio.gather(
-            *(self.gql(QL_ISSUES, {"teamId": t["id"]}) for t in teams),
+            *(self.fetch_team_issues(t["id"]) for t in teams),
             return_exceptions=True,
         )
         if not self._all_teams:
@@ -2188,15 +2454,20 @@ class LTUI(App):
                 # keep whatever that team last had rather than dropping it
                 if t["id"] in self._states_by_team:
                     per_team[t["id"]] = self._states_by_team[t["id"]]
-                    issues += [i for i in cached_issues
-                               if (i.get("team") or {}).get("id") == t["id"]]
+                    issues += [
+                        i
+                        for i in cached_issues
+                        if (i.get("team") or {}).get("id") == t["id"]
+                    ]
                 continue
             issues += self._stamp_team(data["team"]["issues"]["nodes"], t)
             per_team[t["id"]] = data["team"]["states"]["nodes"]
             write_cache(
                 f"team-{t['id']}",
-                {"issues": data["team"]["issues"]["nodes"],
-                 "states": data["team"]["states"]["nodes"]},
+                {
+                    "issues": data["team"]["issues"]["nodes"],
+                    "states": data["team"]["states"]["nodes"],
+                },
             )
 
         issues_list.loading = False
@@ -2205,8 +2476,11 @@ class LTUI(App):
             self.notify("linear: could not load any team", severity="error", timeout=10)
             return
         if failed:
-            self.notify(f"linear: {', '.join(failed)} failed to refresh",
-                        severity="warning", timeout=8)
+            self.notify(
+                f"linear: {', '.join(failed)} failed to refresh",
+                severity="warning",
+                timeout=8,
+            )
         self._states_by_team.update(per_team)
         self._set_issues(issues, self._merge_states(per_team))
         self.render_issues()
@@ -2232,8 +2506,7 @@ class LTUI(App):
         if isinstance(self.screen, ModalScreen):
             return
         if any(
-            w.group == "mutate" and w.state == WorkerState.RUNNING
-            for w in self.workers
+            w.group == "mutate" and w.state == WorkerState.RUNNING for w in self.workers
         ):
             return
         if self._all_teams:
@@ -2276,8 +2549,7 @@ class LTUI(App):
         children = (data["issue"].get("children") or {}).get("nodes") or []
         if children:
             done = sum(
-                1 for ch in children
-                if ch["state"]["type"] in ("completed", "canceled")
+                1 for ch in children if ch["state"]["type"] in ("completed", "canceled")
             )
             chead = Text("\uf0e8 ", style=C_MAUVE)
             chead.append(f"sub-issues · {done}/{len(children)}", style=f"bold {C_SUB}")
@@ -2285,7 +2557,7 @@ class LTUI(App):
             for ch in children:
                 st = ch["state"]
                 row = Text(no_wrap=True, overflow="ellipsis")
-                row.append(f"{state_icon(st)} ", style=st["color"] or C_SUB)
+                row.append(f"{state_icon(st)} ", style=tracker_state_color(st))
                 row.append(ch["identifier"], style=C_DIM)
                 c_title = ch["title"]
                 if len(c_title) > 60:
@@ -2303,9 +2575,11 @@ class LTUI(App):
             await box.mount(Static(Text("   nothing here yet", style=C_DIM)))
             return
         for c in comments:
-            author = (c.get("user") or {}).get("displayName") or (
-                c.get("botActor") or {}
-            ).get("name") or "unknown"
+            author = (
+                (c.get("user") or {}).get("displayName")
+                or (c.get("botActor") or {}).get("name")
+                or "unknown"
+            )
             meta = Text()
             meta.append("● ", style=C_MAUVE)
             meta.append(author, style=f"bold {C_TEXT}")
@@ -2410,17 +2684,13 @@ class LTUI(App):
             self.load_comments(issue)
 
     # ── rendering ─────────────────────────────────────────────────────
-    def render_issues(self, keep: str | None = None) -> None:
-        ol = self.query_one("#issues", NavList)
-        if keep is None:
-            prev = ol.highlighted
-            if prev is not None:
-                opt = ol.get_option_at_index(prev)
-                keep = opt.id if opt else None
-
-        width = max(ol.content_size.width - 2, 40)
-        flt = self._filter.lower()
+    def _visible_issues(self) -> list[dict]:
+        """Apply view filters without changing the cached issue records."""
+        filter_text = self._filter.lower()
         issues = self._issues
+        allowed_types = STATUS_FILTERS[self._status_filter][1]
+        if allowed_types is not None:
+            issues = [i for i in issues if i["state"]["type"] in allowed_types]
         if self._mine and self._viewer_id:
             issues = [
                 i
@@ -2433,28 +2703,30 @@ class LTUI(App):
                 for i in issues
                 if (i.get("project") or {}).get("id", "") == self._project_filter
             ]
-        if flt:
+        if filter_text:
             issues = [
-                i
-                for i in issues
-                if flt
+                issue
+                for issue in issues
+                if filter_text
                 in (
-                    i["title"]
+                    issue["title"]
                     + " "
-                    + i["identifier"]
+                    + issue["identifier"]
                     + " "
-                    + ((i.get("assignee") or {}).get("displayName") or "")
+                    + ((issue.get("assignee") or {}).get("displayName") or "")
                 ).lower()
             ]
+        return issues
 
-        def mine_first(i: dict):
-            is_mine = (i.get("assignee") or {}).get("id") == self._viewer_id
-            return (0 if is_mine else 1, *issue_sort_key(i))
+    def _issue_groups(
+        self, issues: list[dict], width: int
+    ) -> list[tuple[Text, list[dict]]]:
+        """Build headers and ordered groups before replacing the displayed rows."""
 
-        def in_group_key(i: dict):
-            # inside a project / initiative keep the status order, then
-            # mine-first + recency
-            return (state_sort_key(i["state"]), *mine_first(i))
+        def in_group_key(issue: dict):
+            # Project, milestone, and initiative groups keep status order,
+            # then Linear's manual order. Assignment does not change rank.
+            return (state_sort_key(issue["state"]), *issue_sort_key(issue))
 
         if self._group_by == "project":
             by_proj: dict[str, list[dict]] = {}
@@ -2469,9 +2741,37 @@ class LTUI(App):
                 key=lambda p: (p["id"] == "", -len(by_proj[p["id"]])),
             )
             groups = [
-                (self._project_header_row(p, len(by_proj[p["id"]]), width),
-                 sorted(by_proj[p["id"]], key=in_group_key))
+                (
+                    self._project_header_row(p, len(by_proj[p["id"]]), width),
+                    sorted(by_proj[p["id"]], key=in_group_key),
+                )
                 for p in ordered_groups
+            ]
+        elif self._group_by == "milestone":
+            by_milestone: dict[str, list[dict]] = {}
+            milestone_of: dict[str, dict] = {}
+            for i in issues:
+                milestone = i.get("projectMilestone") or {
+                    "id": "",
+                    "name": "no milestone",
+                    "targetDate": None,
+                }
+                by_milestone.setdefault(milestone["id"], []).append(i)
+                milestone_of[milestone["id"]] = milestone
+            ordered_groups = sorted(
+                milestone_of.values(),
+                key=lambda m: (
+                    m["id"] == "",
+                    m.get("targetDate") or "9999-12-31",
+                    m.get("name") or "",
+                ),
+            )
+            groups = [
+                (
+                    self._milestone_header_row(m, len(by_milestone[m["id"]]), width),
+                    sorted(by_milestone[m["id"]], key=in_group_key),
+                )
+                for m in ordered_groups
             ]
         elif self._group_by == "initiative":
             # issues reach an initiative through their project, so anything
@@ -2490,8 +2790,10 @@ class LTUI(App):
                 key=lambda x: (x["id"] == "", initiative_sort_key(x)),
             )
             groups = [
-                (self._initiative_header_row(x, len(by_init[x["id"]]), width),
-                 sorted(by_init[x["id"]], key=in_group_key))
+                (
+                    self._initiative_header_row(x, len(by_init[x["id"]]), width),
+                    sorted(by_init[x["id"]], key=in_group_key),
+                )
                 for x in ordered_groups
             ]
         else:
@@ -2505,21 +2807,40 @@ class LTUI(App):
                 key = state_group_key(i["state"], merged)
                 by_state.setdefault(key, []).append(i)
                 prev = state_of.get(key)
-                if prev is None or (i["state"]["position"] or 0) < (prev["position"] or 0):
+                if prev is None or (i["state"]["position"] or 0) < (
+                    prev["position"] or 0
+                ):
                     state_of[key] = i["state"]
             ordered_states = sorted(state_of.values(), key=state_sort_key)
             groups = [
-                (self._header_row(st, len(by_state[state_group_key(st, merged)]), width),
-                 sorted(by_state[state_group_key(st, merged)], key=mine_first))
+                (
+                    self._header_row(
+                        st, len(by_state[state_group_key(st, merged)]), width
+                    ),
+                    sorted(by_state[state_group_key(st, merged)], key=issue_sort_key),
+                )
                 for st in ordered_states
             ]
+        return groups
+
+    def render_issues(self, keep: str | None = None) -> None:
+        issues_list = self.query_one("#issues", NavList)
+        if keep is None:
+            previous_index = issues_list.highlighted
+            if previous_index is not None:
+                previous_option = issues_list.get_option_at_index(previous_index)
+                keep = previous_option.id if previous_option else None
+
+        width = max(issues_list.content_size.width - 2, 40)
+        issues = self._visible_issues()
+        groups = self._issue_groups(issues, width)
 
         id_w = max((len(i["identifier"]) for i in issues), default=6)
         # a column every row leaves blank is not worth its width
         show_due = width >= DUE_COL_MIN_WIDTH and any(
             i.get("dueDate") for i in issues
         )
-        ol.clear_options()
+        issues_list.clear_options()
         self._opt_index = {}
         self._header_indices = []
         opts: list[Option] = []
@@ -2530,42 +2851,68 @@ class LTUI(App):
             first = False
             self._header_indices.append(len(opts))
             opts.append(Option(header, disabled=True))
+            ready_position = 0
             for i in group:
                 self._opt_index[i["id"]] = len(opts)
-                opts.append(
-                    Option(self._issue_row(i, width, id_w, show_due), id=i["id"])
-                )
+                prefix = ""
+                if self._status_filter == "active":
+                    if i["state"]["type"] == "unstarted":
+                        ready_position += 1
+                        position = (
+                            str(ready_position)
+                            if i.get("sortOrder") is not None
+                            else "?"
+                        )
+                        prefix = f"{position:>2}  "
+                    else:
+                        prefix = "    "
+                row = self._issue_row(i, width - len(prefix), id_w, show_due)
+                if prefix:
+                    row = Text(prefix, style=C_BLUE) + row
+                opts.append(Option(row, id=i["id"]))
         if not opts:
-            msg = "no matches" if flt else "no issues"
-            opts.append(Option(Text(f"  {msg}", style=C_DIM), disabled=True))
-        ol.add_options(opts)
+            if self._filter.lower():
+                message = "no matches"
+            elif self._status_filter != "all":
+                message = "no issues for these statuses · f changes statuses"
+            else:
+                message = "no issues"
+            opts.append(Option(Text(f"  {message}", style=C_DIM), disabled=True))
+        issues_list.add_options(opts)
 
         # a group's first issue sits right after its header row
         self._group_starts = [h + 1 for h in self._header_indices]
         mine_tag = " \uf007 mine \u00b7" if self._mine else ""
-        proj_tag = ""
         if self._project_filter is not None:
-            pname = next(
-                ((i.get("project") or {}).get("name") for i in self._issues
-                 if (i.get("project") or {}).get("id", "") == self._project_filter),
-                "no project",
-            ) or "no project"
-            proj_tag = f" \uf07b {pname} \u00b7"
-        # with three groupings the active one is worth stating; status is the
-        # default the headers already make obvious
-        group_tag = (
-            f" \uf0ca {self._group_by} \u00b7" if self._group_by != "status" else ""
+            pname = (
+                next(
+                    (
+                        (i.get("project") or {}).get("name")
+                        for i in self._issues
+                        if (i.get("project") or {}).get("id", "")
+                        == self._project_filter
+                    ),
+                    "no project",
+                )
+                or "no project"
+            )
+        project_name = pname if self._project_filter is not None else "All projects"
+        team_name = self._team["key"] if self._team else "No team"
+        self.query_one("#centre").border_title = (
+            f" {self._org or 'Linear'} / {team_name} / {project_name} "
         )
+        status_label = STATUS_FILTERS[self._status_filter][0].split(":")[0]
         self.query_one("#centre").border_subtitle = (
-            f"{mine_tag}{proj_tag}{group_tag} {len(issues)} issues "
+            f" {status_label} · group: {self._group_by} · manual ·"
+            f"{mine_tag} {len(issues)} issues "
         )
         if keep and keep in self._opt_index:
-            ol.highlighted = self._opt_index[keep]
+            issues_list.highlighted = self._opt_index[keep]
         elif self._opt_index:
-            ol.highlighted = min(self._opt_index.values())
+            issues_list.highlighted = min(self._opt_index.values())
 
     def _header_row(self, state: dict, count: int, width: int) -> Text:
-        color = state["color"] or C_SUB
+        color = tracker_state_color(state)
         t = Text(no_wrap=True, overflow="ellipsis")
         t.append(f"{state_icon(state)} ", style=color)
         t.append(state["name"], style=f"bold {color}")
@@ -2576,7 +2923,7 @@ class LTUI(App):
         return t
 
     def _project_header_row(self, project: dict, count: int, width: int) -> Text:
-        color = project.get("color") or C_DIM
+        color = tracker_role_color("project", C_DIM)
         t = Text(no_wrap=True, overflow="ellipsis")
         t.append("\uf07b ", style=color)
         t.append(project["name"], style=f"bold {color}")
@@ -2586,8 +2933,20 @@ class LTUI(App):
             t.append("\u2500" * fill, style=C_FAINT)
         return t
 
+    def _milestone_header_row(self, milestone: dict, count: int, width: int) -> Text:
+        t = Text(no_wrap=True, overflow="ellipsis")
+        t.append("\uf133 ", style=C_BLUE)
+        t.append(milestone["name"], style=f"bold {C_BLUE}")
+        if target := milestone.get("targetDate"):
+            t.append(f" · due {target}", style=C_DIM)
+        t.append(f" · {count} ", style=C_DIM)
+        fill = width - t.cell_len - 1
+        if fill > 0:
+            t.append("─" * fill, style=C_FAINT)
+        return t
+
     def _initiative_header_row(self, init: dict, count: int, width: int) -> Text:
-        color = init.get("color") or C_LAV
+        color = tracker_role_color("initiative", C_LAV)
         t = Text(no_wrap=True, overflow="ellipsis")
         t.append("\uf024 ", style=color)
         t.append(init["name"], style=f"bold {color}")
@@ -2613,7 +2972,7 @@ class LTUI(App):
         """
         if not self._all_teams:
             return C_DIM
-        return (self._team_of(issue) or {}).get("color") or C_DIM
+        return tracker_role_color("team", C_DIM)
 
     def _issue_row(
         self, issue: dict, width: int, id_w: int, show_due: bool = False
@@ -2628,7 +2987,7 @@ class LTUI(App):
         """
         st = issue["state"]
         t = Text(no_wrap=True, overflow="ellipsis")
-        t.append(f"{state_icon(st)} ", style=st["color"] or C_SUB)
+        t.append(f"{state_icon(st)} ", style=tracker_state_color(st))
         t.append(issue["identifier"].ljust(id_w), style=self._identifier_style(issue))
         t.append(" ")
 
@@ -2640,9 +2999,13 @@ class LTUI(App):
         blocked_by, blocks = block_info(issue)
         badges = []
         if blocked_by:
-            badges.append((" \uf056", C_RED))  # blocked by something
+            badges.append(
+                (" \uf056", tracker_role_color("blocked", C_RED))
+            )  # blocked by something
         if blocks:
-            badges.append((" \uf06a", C_PEACH))  # blocking something
+            badges.append(
+                (" \uf06a", tracker_role_color("blocking", C_PEACH))
+            )  # blocking something
 
         right_w = 3 + 2 + 10 + 2 + 4  # prio, gap, assignee, gap, updated
         if show_due:
@@ -2657,7 +3020,7 @@ class LTUI(App):
         for badge, color in badges:
             t.append(badge, style=color)
         for lb in labels:
-            t.append(" ●", style=lb["color"] or C_DIM)
+            t.append(" ●", style=tracker_role_color("label", C_DIM))
         pad = title_w - len(title) - dots_w
         if pad > 0:
             t.append(" " * pad)
@@ -2705,8 +3068,8 @@ class LTUI(App):
     def _update_detail_meta(self, issue: dict) -> None:
         st = issue["state"]
         m = Text()
-        m.append(f"{state_icon(st)} ", style=st["color"] or C_SUB)
-        m.append(st["name"], style=f"bold {st['color'] or C_SUB}")
+        m.append(f"{state_icon(st)} ", style=tracker_state_color(st))
+        m.append(st["name"], style=f"bold {tracker_state_color(st)}")
         m.append("   ")
         m.append_text(priority_cell(issue["priority"]))
         m.append(f" {priority_name(issue['priority'])}", style=C_SUB)
@@ -2717,7 +3080,7 @@ class LTUI(App):
         project = issue.get("project")
         if project:
             m.append("   ")
-            m.append("\uf07b ", style=project.get("color") or C_DIM)
+            m.append("\uf07b ", style=tracker_role_color("project", C_DIM))
             m.append(project["name"], style=C_SUB)
         due = issue.get("dueDate")
         if due:
@@ -2728,19 +3091,21 @@ class LTUI(App):
         if labels:
             m.append("\n")
             for lb in labels:
-                m.append(" ", style=lb["color"] or C_DIM)
+                m.append(" ", style=tracker_role_color("label", C_DIM))
                 m.append(f"{lb['name']}  ", style=C_SUB)
         blocked_by, blocks = block_info(issue)
         if blocked_by or blocks:
             m.append("\n")
             if blocked_by:
-                m.append("\uf056 ", style=C_RED)
-                m.append("blocked by " + " \u00b7 ".join(blocked_by), style=C_RED)
+                color = tracker_role_color("blocked", C_RED)
+                m.append("\uf056 ", style=color)
+                m.append("blocked by " + " \u00b7 ".join(blocked_by), style=color)
             if blocked_by and blocks:
                 m.append("   ")
             if blocks:
-                m.append("\uf06a ", style=C_PEACH)
-                m.append("blocks " + " \u00b7 ".join(blocks), style=C_PEACH)
+                color = tracker_role_color("blocking", C_PEACH)
+                m.append("\uf06a ", style=color)
+                m.append("blocks " + " \u00b7 ".join(blocks), style=color)
         m.append("\n")
         m.append(" ", style=C_DIM)
         m.append(
@@ -2822,20 +3187,16 @@ class LTUI(App):
             self._spin_frame = (self._spin_frame + 1) % len(SPINNER_FRAMES)
             frame = SPINNER_FRAMES[self._spin_frame]
             try:
-                self.query_one("#centre").border_subtitle = (
-                    f" {len(self._issues)} \u00b7 {frame} refreshing "
-                )
+                self.query_one(
+                    "#centre"
+                ).border_subtitle = f" {len(self._issues)} \u00b7 {frame} refreshing "
             except Exception:
                 pass
 
     def _update_header(self) -> None:
-        if self._org is None or self._viewer_name is None:
-            return
         markup = (
             f"[bold {C_BLUE}] \uf03a [/]"
             + wave_markup("ltui", self._wave_pos, f"bold {C_BLUE}", C_LAV)
-            + f"[{C_VFAINT}]  \u00b7  [/][{C_SUB}]{escape(self._org)}[/]"
-            + f"[{C_VFAINT}] / [/][{C_DIM}]{escape(self._viewer_name)}[/]"
         )
         self.query_one("#appheader", Static).update(markup)
 
@@ -2907,9 +3268,11 @@ class LTUI(App):
         if self._project_filter is None:
             row.append("  \uf00c", style=C_GREEN)
         opts.append(Option(row, id="all:"))
-        for pid, p in sorted(projects.items(), key=lambda x: (x[0] == "", -counts[x[0]])):
+        for pid, p in sorted(
+            projects.items(), key=lambda x: (x[0] == "", x[1]["name"].casefold())
+        ):
             row = Text()
-            row.append("\uf07b ", style=p.get("color") or C_DIM)
+            row.append("\uf07b ", style=tracker_role_color("project", C_DIM))
             row.append(p["name"], style=C_TEXT)
             row.append(f"  {counts[pid]}", style=C_DIM)
             if self._project_filter == pid:
@@ -2923,6 +3286,12 @@ class LTUI(App):
                 self._project_filter = None
             else:
                 self._project_filter = choice.removeprefix("proj:")
+            self._project_choice_key = (self._org, self._scope_id())
+            data = load_state()
+            choices = data.setdefault("project_choices", {})
+            key = json.dumps([self._org, self._scope_id(), str(self._repository)])
+            choices[key] = self._project_filter
+            save_state(data)
             self.render_issues()
 
         self.push_screen(PickerModal("filter by project", opts), done)
@@ -2952,7 +3321,7 @@ class LTUI(App):
         fid = self.focused.id if self.focused else None
         if fid == "d-scroll":
             self.query_one("#issues", NavList).focus()
-        elif fid == "issues":
+        elif fid == "issues" and not self._sidebar_hidden:
             self.query_one("#teams", NavList).focus()
 
     def action_focus_right(self) -> None:
@@ -2969,15 +3338,36 @@ class LTUI(App):
             self.query_one("#d-scroll").focus()
 
     def action_toggle_group(self) -> None:
-        nxt = (GROUP_MODES.index(self._group_by) + 1) % len(GROUP_MODES)
-        self._group_by = GROUP_MODES[nxt]
-        self._save_state()
-        if self._group_by == "initiative" and self._initiatives is None:
-            # first look at this board \u2014 group now, fill the headers in when
-            # the workspace's initiatives land
-            self.load_initiatives(rerender=True)
-        self.render_issues()
-        self.notify(f"\uf0ca grouping by {self._group_by}")
+        options = [
+            Option(f"{mode}{' ✓' if mode == self._group_by else ''}", id=mode)
+            for mode in GROUP_MODES
+        ]
+
+        def done(choice: str | None) -> None:
+            if choice is None:
+                return
+            self._group_by = choice
+            self._save_state()
+            if choice == "initiative" and self._initiatives is None:
+                self.load_initiatives(rerender=True)
+            self.render_issues()
+
+        self.push_screen(PickerModal("group issues by", options), done)
+
+    def action_toggle_focus(self) -> None:
+        options = [
+            Option(f"{label}{' ✓' if key == self._status_filter else ''}", id=key)
+            for key, (label, _) in STATUS_FILTERS.items()
+        ]
+
+        def done(choice: str | None) -> None:
+            if choice is None:
+                return
+            self._status_filter = choice
+            self._save_state()
+            self.render_issues()
+
+        self.push_screen(PickerModal("filter by status", options), done)
 
     def action_toggle_mine(self) -> None:
         self._mine = not self._mine
@@ -3009,7 +3399,7 @@ class LTUI(App):
         opts = []
         for s in sorted(states, key=state_sort_key):
             row = Text()
-            row.append(f"{state_icon(s)} ", style=s["color"] or C_SUB)
+            row.append(f"{state_icon(s)} ", style=tracker_state_color(s))
             row.append(s["name"], style=C_TEXT)
             if s["id"] == issue["state"]["id"]:
                 row.append("  ", style=C_GREEN)
@@ -3047,9 +3437,7 @@ class LTUI(App):
         if not labels:
             self.notify("this team has no labels yet", severity="warning")
             return
-        current = {
-            lb["id"] for lb in issue["labels"]["nodes"] if lb.get("id")
-        }
+        current = {lb["id"] for lb in issue["labels"]["nodes"] if lb.get("id")}
 
         def done(ids: list | None) -> None:
             if ids is not None and set(ids) != current:
@@ -3063,9 +3451,7 @@ class LTUI(App):
     @work(group="mutate")
     async def apply_labels(self, issue: dict, label_ids: list) -> None:
         try:
-            data = await self.gql(
-                M_LABELS, {"id": issue["id"], "labelIds": label_ids}
-            )
+            data = await self.gql(M_LABELS, {"id": issue["id"], "labelIds": label_ids})
             issue["labels"] = data["issueUpdate"]["issue"]["labels"]
         except Exception as e:
             self.notify(f"update failed: {e}", severity="error")
@@ -3113,7 +3499,7 @@ class LTUI(App):
         opts.append(Option(row, id="none:"))
         for p in projects:
             row = Text(no_wrap=True, overflow="ellipsis")
-            row.append("\uf07b ", style=p.get("color") or C_DIM)
+            row.append("\uf07b ", style=tracker_role_color("project", C_DIM))
             row.append(p["name"], style=C_TEXT)
             if p["id"] == current:
                 row.append("  \uf00c", style=C_GREEN)
@@ -3123,9 +3509,11 @@ class LTUI(App):
             if choice is None:
                 return
             if choice == "new:":
+
                 def named(name: str | None) -> None:
                     if name:
                         self.create_project_and_assign(issue, name)
+
                 self.push_screen(ProjectNameModal(), named)
             elif choice == "none:":
                 if current is not None:
@@ -3413,11 +3801,11 @@ config: ~/.config/ltui/config.json remaps any keybind and sets options
 auth: LINEAR_API_KEY env var, ~/.config/ltui/config.toml, or
       linear-cli's config. no key? ltui asks on first launch.
 
-keys: enter open ticket   n new   s status   p priority   d due date
+keys: enter open ticket   n new   s status   P priority   d due date
       c comment
-      a assign   l labels   P project   o browser   y yank   / filter
+      a assign   l labels   M move project   o browser   y yank   / filter
       x run ~/.linear/coding-tools.json custom script on the ticket
-      m mine only   v group status/project/initiative
+      m mine only   f choose statuses   p choose project   v choose grouping
       V one project   t theme
       , settings   j/k navigate   g/G top/bottom   r refresh   ? help
       q quit

@@ -13,13 +13,22 @@ from __future__ import annotations
 __version__ = "0.3.0"
 
 import json
+import os
+import re
 import sys
-import tomllib
 import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
+import tomllib
+from flume_tracker_theme import (
+    active_flume_theme,
+    load_flume_themes,
+    theme_palette,
+    theme_roles,
+    watch_flume_theme_changes,
+)
 from rich.markup import escape
 from rich.text import Text
 from textual import on, work
@@ -29,7 +38,15 @@ from textual.color import Color as TColor
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.theme import Theme
-from textual.widgets import Button, Footer, Input, Markdown, OptionList, Static, TextArea
+from textual.widgets import (
+    Button,
+    Footer,
+    Input,
+    Markdown,
+    OptionList,
+    Static,
+    TextArea,
+)
 from textual.widgets.option_list import Option
 from textual.worker import WorkerState
 
@@ -53,32 +70,100 @@ C_RED = "#f38ba8"
 C_MAUVE = "#cba6f7"
 
 _PALETTE = dict(
-    C_TEXT=C_TEXT, C_SUB=C_SUB, C_DIM=C_DIM, C_FAINT=C_FAINT, C_VFAINT=C_VFAINT,
-    C_BLUE=C_BLUE, C_LAV=C_LAV, C_PEACH=C_PEACH, C_GREEN=C_GREEN, C_RED=C_RED,
+    C_TEXT=C_TEXT,
+    C_SUB=C_SUB,
+    C_DIM=C_DIM,
+    C_FAINT=C_FAINT,
+    C_VFAINT=C_VFAINT,
+    C_BLUE=C_BLUE,
+    C_LAV=C_LAV,
+    C_PEACH=C_PEACH,
+    C_GREEN=C_GREEN,
+    C_RED=C_RED,
     C_MAUVE=C_MAUVE,
 )
 _PALETTE_ANSI = dict(
-    C_TEXT="default", C_SUB="white", C_DIM="bright_black", C_FAINT="bright_black",
-    C_VFAINT="bright_black", C_BLUE="blue", C_LAV="bright_blue", C_PEACH="yellow",
-    C_GREEN="green", C_RED="red", C_MAUVE="magenta",
+    C_TEXT="default",
+    C_SUB="white",
+    C_DIM="bright_black",
+    C_FAINT="bright_black",
+    C_VFAINT="bright_black",
+    C_BLUE="blue",
+    C_LAV="bright_blue",
+    C_PEACH="yellow",
+    C_GREEN="green",
+    C_RED="red",
+    C_MAUVE="magenta",
 )
 
 
-def set_palette(ansi: bool) -> None:
-    """Swap the chrome palette; `system` draws it in terminal ANSI colors."""
-    globals().update(_PALETTE_ANSI if ansi else _PALETTE)
+_TRACKER_ROLES: dict[str, str] = {}
+
+
+def set_palette(theme: str) -> None:
+    """Swap the chrome palette for built-in, ANSI, or Flume themes."""
+    roles = theme_roles(theme) or {}
+    globals()["_TRACKER_ROLES"] = roles
+    globals().update(
+        theme_palette(theme) or (_PALETTE_ANSI if theme == "system" else _PALETTE)
+    )
+
+
+def tracker_role_color(role: str, fallback: str | None = None) -> str:
+    """Resolve a deliberately assigned tracker role in the active theme."""
+    return _TRACKER_ROLES.get(role, fallback or C_SUB)
+
+
+def tracker_state_color(state: dict) -> str:
+    """Map workflow semantics onto deliberately assigned Flume roles."""
+    role = {
+        "triage": "status_triage",
+        "started": "status_started",
+        "unstarted": "status_unstarted",
+        "backlog": "status_backlog",
+        "completed": "status_completed",
+        "canceled": "status_canceled",
+        "duplicate": "status_canceled",
+    }.get(state.get("type"))
+    return tracker_role_color(role, C_SUB) if role else C_SUB
+
+
+def preferred_tracker_scope(scopes: list[dict]) -> dict | None:
+    """Choose the scope matching repo config, issue branch, or repository name."""
+
+    def token(value: object) -> str:
+        return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
+
+    explicit = token(os.environ.get("TRACKER_SCOPE"))
+    repository = token(os.environ.get("TRACKER_REPOSITORY"))
+    for hint, fuzzy in ((explicit, False), (repository, True)):
+        if not hint:
+            continue
+        for scope in scopes:
+            candidates = (token(scope.get("key")), token(scope.get("name")))
+            if hint in candidates or (
+                fuzzy
+                and len(hint) >= 4
+                and any(hint in value or value in hint for value in candidates)
+            ):
+                return scope
+    return None
+
 
 # ── themes ────────────────────────────────────────────────────────────────
-_ACCENTS = dict(
-    success=C_GREEN, warning="#f9e2af", error=C_RED, dark=True
-)
+_ACCENTS = dict(success=C_GREEN, warning="#f9e2af", error=C_RED, dark=True)
 
 THEMES = [
     Theme(
         name="mocha",
-        primary=C_BLUE, secondary=C_MAUVE, accent="#f5c2e7",
-        background="#1e1e2e", surface="#313244", panel="#181825",
-        foreground=C_TEXT, **_ACCENTS,
+        primary=C_BLUE,
+        secondary=C_MAUVE,
+        accent="#f5c2e7",
+        background="#1e1e2e",
+        surface="#313244",
+        panel="#181825",
+        foreground=C_TEXT,
+        **_ACCENTS,
         variables={
             "jtui-border": "#45475a",
             "jtui-border-focus": C_BLUE,
@@ -96,9 +181,14 @@ THEMES = [
     ),
     Theme(
         name="void",
-        primary=C_BLUE, secondary=C_MAUVE, accent="#f5c2e7",
-        background="#000000", surface="#101018", panel="#070709",
-        foreground=C_TEXT, **_ACCENTS,
+        primary=C_BLUE,
+        secondary=C_MAUVE,
+        accent="#f5c2e7",
+        background="#000000",
+        surface="#101018",
+        panel="#070709",
+        foreground=C_TEXT,
+        **_ACCENTS,
         variables={
             "jtui-border": "#26262e",
             "jtui-border-focus": C_BLUE,
@@ -116,9 +206,14 @@ THEMES = [
     ),
     Theme(
         name="onyx",
-        primary="#9aa5b5", secondary="#7d8494", accent="#b8c0cc",
-        background="#0e0e11", surface="#1b1b20", panel="#131317",
-        foreground="#d4d6dd", **_ACCENTS,
+        primary="#9aa5b5",
+        secondary="#7d8494",
+        accent="#b8c0cc",
+        background="#0e0e11",
+        surface="#1b1b20",
+        panel="#131317",
+        foreground="#d4d6dd",
+        **_ACCENTS,
         variables={
             "jtui-border": "#33333c",
             "jtui-border-focus": "#9aa5b5",
@@ -138,9 +233,14 @@ THEMES = [
     # blur/transparency it has) shows through
     Theme(
         name="clear",
-        primary="#8a93a5", secondary="#6f7787", accent="#a9b1c0",
-        background="ansi_default", surface="ansi_default", panel="ansi_default",
-        foreground=C_TEXT, **_ACCENTS,
+        primary="#8a93a5",
+        secondary="#6f7787",
+        accent="#a9b1c0",
+        background="ansi_default",
+        surface="ansi_default",
+        panel="ansi_default",
+        foreground=C_TEXT,
+        **_ACCENTS,
         variables={
             "jtui-border": "#3c3f4a",
             "jtui-border-focus": "#8a93a5",
@@ -160,10 +260,17 @@ THEMES = [
     # alacritty theme becomes the jtui theme
     Theme(
         name="system",
-        primary="ansi_blue", secondary="ansi_magenta", accent="ansi_cyan",
-        background="ansi_default", surface="ansi_default", panel="ansi_default",
+        primary="ansi_blue",
+        secondary="ansi_magenta",
+        accent="ansi_cyan",
+        background="ansi_default",
+        surface="ansi_default",
+        panel="ansi_default",
         foreground="ansi_default",
-        success="ansi_green", warning="ansi_yellow", error="ansi_red", dark=True,
+        success="ansi_green",
+        warning="ansi_yellow",
+        error="ansi_red",
+        dark=True,
         variables={
             "jtui-border": "ansi_bright_black",
             "jtui-border-focus": "ansi_blue",
@@ -181,6 +288,12 @@ THEMES = [
         },
     ),
 ]
+THEMES += load_flume_themes("jtui")
+for _theme in THEMES:
+    _chrome = theme_palette(_theme.name) or _PALETTE
+    for _key, _value in _chrome.items():
+        _variable = "tracker-" + _key.removeprefix("C_").lower().replace("_", "-")
+        _theme.variables.setdefault(_variable, _value)
 THEME_NAMES = [t.name for t in THEMES]
 
 TYPE_RANK = {
@@ -256,20 +369,28 @@ def normalize_issue(raw: dict, site: str) -> dict:
     f = raw.get("fields") or {}
     key = raw.get("key", "?")
     assignee = f.get("assignee")
-    priority = PRIORITY_MAP.get(((f.get("priority") or {}).get("name") or "").lower(), 0)
-    relations, inverse = [], []
+    priority = PRIORITY_MAP.get(
+        ((f.get("priority") or {}).get("name") or "").lower(), 0
+    )
+
+    relations = []
+    inverse = []
     for link in f.get("issuelinks") or []:
         ltype = (link.get("type") or {}).get("name", "")
         if ltype != "Blocks":
             continue
         if link.get("outwardIssue"):
             relations.append(
-                {"type": "blocks", "relatedIssue": {"identifier": link["outwardIssue"]["key"]}}
+                {
+                    "type": "blocks",
+                    "relatedIssue": {"identifier": link["outwardIssue"]["key"]},
+                }
             )
         if link.get("inwardIssue"):
             inverse.append(
                 {"type": "blocks", "issue": {"identifier": link["inwardIssue"]["key"]}}
             )
+
     parent = f.get("parent")
     parent_type = ((parent or {}).get("fields") or {}).get("issuetype") or {}
     epic = None
@@ -279,6 +400,7 @@ def normalize_issue(raw: dict, site: str) -> dict:
             "name": ((parent.get("fields") or {}).get("summary")) or parent["key"],
             "color": label_color(parent["key"]),
         }
+
     subtasks = [
         {
             "identifier": s.get("key", "?"),
@@ -287,6 +409,7 @@ def normalize_issue(raw: dict, site: str) -> dict:
         }
         for s in f.get("subtasks") or []
     ]
+
     title = f.get("summary") or ""
     return {
         "id": key,
@@ -296,15 +419,24 @@ def normalize_issue(raw: dict, site: str) -> dict:
         "url": f"https://{site}/browse/{key}",
         "priority": priority,
         "branchName": f"{key.lower()}-{slugify(title)}",
-        "updatedAt": f.get("updated") or f.get("created") or "1970-01-01T00:00:00.000+0000",
+        "updatedAt": f.get("updated")
+        or f.get("created")
+        or "1970-01-01T00:00:00.000+0000",
         "createdAt": f.get("created") or "1970-01-01T00:00:00.000+0000",
         "state": normalize_state(f.get("status") or {}),
         "assignee": (
-            {"id": assignee.get("accountId", ""), "displayName": assignee.get("displayName", "?")}
+            {
+                "id": assignee.get("accountId", ""),
+                "displayName": assignee.get("displayName", "?"),
+            }
             if assignee
             else None
         ),
-        "labels": {"nodes": [{"name": l, "color": label_color(l)} for l in f.get("labels") or []]},
+        "labels": {
+            "nodes": [
+                {"name": l, "color": label_color(l)} for l in f.get("labels") or []
+            ]
+        },
         "relations": {"nodes": relations},
         "inverseRelations": {"nodes": inverse},
         "parent": (
@@ -343,6 +475,7 @@ DEFAULT_KEYBINDS = {
     "filter": (["slash"], "filter"),
     "toggle_mine": (["m"], "mine"),
     "toggle_group": (["v"], "group"),
+    "toggle_sidebar": (["b"], None),
     "pick_project": (["V"], None),
     "cycle_theme": (["t"], "theme"),
     "open_settings": (["comma"], None),
@@ -369,14 +502,20 @@ def build_bindings(user_keybinds: dict | None = None) -> list:
     """App bindings from defaults + config.json overrides. Fail-safe: a bad
     config falls back to the defaults for the affected action."""
     merged: dict[str, tuple[list, str | None]] = {}
-    user_keybinds = user_keybinds if user_keybinds is not None else (
-        USER_CONFIG.get("keybinds", {}) if isinstance(USER_CONFIG, dict) else {}
+    user_keybinds = (
+        user_keybinds
+        if user_keybinds is not None
+        else (USER_CONFIG.get("keybinds", {}) if isinstance(USER_CONFIG, dict) else {})
     )
     for action, (keys, label) in DEFAULT_KEYBINDS.items():
         custom = user_keybinds.get(action)
         if isinstance(custom, str):
             keys = [custom]
-        elif isinstance(custom, list) and all(isinstance(k, str) for k in custom) and custom:
+        elif (
+            isinstance(custom, list)
+            and all(isinstance(k, str) for k in custom)
+            and custom
+        ):
             keys = custom
         merged[action] = (keys, label)
     bindings = [Binding("escape", "back", show=False)]
@@ -388,6 +527,7 @@ def build_bindings(user_keybinds: dict | None = None) -> list:
                     action,
                     label or "",
                     show=bool(label) and i == 0,
+                    priority=action == "toggle_sidebar",
                 )
             )
     return bindings
@@ -401,6 +541,7 @@ CONFIG_TEMPLATE = """{
     "filter": "slash",
     "toggle_mine": "m",
     "toggle_group": "v",
+    "toggle_sidebar": "b",
     "pick_project": "V",
     "cycle_theme": "t",
     "open_settings": "comma",
@@ -447,9 +588,7 @@ def load_credentials() -> tuple[str, str, str]:
 def save_credentials(site: str, email: str, token: str) -> None:
     JTUI_CONFIG.parent.mkdir(parents=True, exist_ok=True)
     site = site.removeprefix("https://").strip("/")
-    JTUI_CONFIG.write_text(
-        f'site = "{site}"\nemail = "{email}"\ntoken = "{token}"\n'
-    )
+    JTUI_CONFIG.write_text(f'site = "{site}"\nemail = "{email}"\ntoken = "{token}"\n')
     JTUI_CONFIG.chmod(0o600)
 
 
@@ -457,7 +596,8 @@ async def verify_credentials(site: str, email: str, token: str) -> str:
     """Check credentials against Jira; returns the display name or raises."""
     site = site.removeprefix("https://").strip("/")
     async with httpx.AsyncClient(
-        auth=(email, token), timeout=15,
+        auth=(email, token),
+        timeout=15,
         headers={"Accept": "application/json"},
     ) as client:
         resp = await client.get(f"https://{site}/rest/api/2/myself")
@@ -510,7 +650,7 @@ def state_icon(state: dict) -> str:
 def priority_cell(p: int) -> Text:
     t = Text()
     if p == 1:
-        t.append(" ", style=f"bold {C_PEACH}")
+        t.append(" ", style=f"bold {tracker_role_color('priority_urgent', C_PEACH)}")
         t.append("  ")
     elif p in (2, 3, 4):
         lit = {2: 3, 3: 2, 4: 1}[p]
@@ -954,7 +1094,10 @@ class ThemeModal(ModalScreen):
 
     def _row(self, name: str, active: str) -> Option:
         row = Text("  ")
-        row.append("\u25cf " if name == active else "\u25cb ", style=C_BLUE if name == active else C_DIM)
+        row.append(
+            "\u25cf " if name == active else "\u25cb ",
+            style=C_BLUE if name == active else C_DIM,
+        )
         row.append(name, style=C_TEXT if name == active else C_SUB)
         return Option(row, id=name)
 
@@ -1038,7 +1181,7 @@ class LabelsModal(ModalScreen):
             row.append("\uf00c " if on_it else "  ", style=C_GREEN)
             if not on_it:
                 row.append(" ")
-            row.append("\u25cf ", style=lb.get("color") or C_DIM)
+            row.append("\u25cf ", style=tracker_role_color("label", C_DIM))
             row.append(lb["name"], style=C_TEXT if on_it else C_SUB)
             opts.append(Option(row, id=lb["id"]))
         ol.add_options(opts)
@@ -1075,9 +1218,7 @@ class ProjectNameModal(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="projname-box"):
-            yield Static(
-                f"[bold {C_SUB}]\uf07b new epic[/]", id="projname-title"
-            )
+            yield Static(f"[bold {C_SUB}]\uf07b new epic[/]", id="projname-title")
             yield Input(placeholder="epic name", id="projname-input")
             yield Static(
                 f"[{C_DIM}]enter creates \u00b7 esc cancels[/]", id="projname-hint"
@@ -1111,7 +1252,9 @@ class SettingsModal(ModalScreen):
         app = self.app
         profile = Text()
         profile.append(" ", style=C_BLUE)
-        profile.append(getattr(app, "_viewer_name", None) or "…", style=f"bold {C_TEXT}")
+        profile.append(
+            getattr(app, "_viewer_name", None) or "…", style=f"bold {C_TEXT}"
+        )
         org = getattr(app, "_org", None)
         if org:
             profile.append(f"  ·  {org}", style=C_DIM)
@@ -1168,41 +1311,54 @@ class HelpModal(ModalScreen):
     ]
 
     SECTIONS = [
-        ("navigate", [
-            ("ctrl+d / ctrl+u", "half page down / up"),
-            ("[ / ]", "previous / next group"),
-            (":", "command palette"),
-            ("j/k ↑↓", "move around lists and the detail panel"),
-            ("← / →", "switch panes — → on a ticket opens it"),
-            ("g / G", "jump to top / bottom"),
-            ("enter", "open ticket detail (click works too)"),
-            ("esc", "close panel · dismiss modal · clear filter"),
-        ]),
-        ("ticket", [
-            ("n", "new ticket in the current team"),
-            ("s", "change status"),
-            ("p", "change priority"),
-            ("l", "edit labels"),
-            ("P", "move to an epic (or create one)"),
-            ("a", "change assignee (or unassign)"),
-            ("c", "add a comment (ctrl+s to send)"),
-            ("y", "yank — copy branch / url / identifier"),
-            ("o", "open in browser"),
-        ]),
-        ("view", [
-            ("/", "filter issues"),
-            ("m", "toggle mine only"),
-            ("v", "group by status / epic"),
-            ("V", "filter to a single epic"),
-            ("t", "cycle theme"),
-            (",", "settings"),
-            ("r", "refresh"),
-        ]),
-        ("app", [
-            ("?", "this help"),
-            ("ctrl+p", "command palette"),
-            ("q", "quit"),
-        ]),
+        (
+            "navigate",
+            [
+                ("ctrl+d / ctrl+u", "half page down / up"),
+                ("[ / ]", "previous / next group"),
+                (":", "command palette"),
+                ("j/k ↑↓", "move around lists and the detail panel"),
+                ("← / →", "switch panes — → on a ticket opens it"),
+                ("g / G", "jump to top / bottom"),
+                ("enter", "open ticket detail (click works too)"),
+                ("esc", "close panel · dismiss modal · clear filter"),
+            ],
+        ),
+        (
+            "ticket",
+            [
+                ("n", "new ticket in the current team"),
+                ("s", "change status"),
+                ("p", "change priority"),
+                ("l", "edit labels"),
+                ("P", "move to an epic (or create one)"),
+                ("a", "change assignee (or unassign)"),
+                ("c", "add a comment (ctrl+s to send)"),
+                ("y", "yank — copy branch / url / identifier"),
+                ("o", "open in browser"),
+            ],
+        ),
+        (
+            "view",
+            [
+                ("/", "filter issues"),
+                ("m", "toggle mine only"),
+                ("b", "toggle team sidebar"),
+                ("v", "group by status / epic"),
+                ("V", "filter to a single epic"),
+                ("t", "cycle theme"),
+                (",", "settings"),
+                ("r", "refresh"),
+            ],
+        ),
+        (
+            "app",
+            [
+                ("?", "this help"),
+                ("ctrl+p", "command palette"),
+                ("q", "quit"),
+            ],
+        ),
     ]
 
     def compose(self) -> ComposeResult:
@@ -1311,25 +1467,25 @@ class JTUI(App):
     #split-right.open {{ display: block; }}
     #teams {{
         height: 1fr;
-        border: round $jtui-border; border-title-color: {C_SUB};
+        border: round $jtui-border; border-title-color: $tracker-sub;
     }}
     #teams:focus {{ border: round $jtui-border-focus; border-title-color: $jtui-border-focus; }}
     #profile {{
         height: auto; padding: 0 1;
-        border: round $jtui-border; border-title-color: {C_SUB};
+        border: round $jtui-border; border-title-color: $tracker-sub;
     }}
 
     #centre {{
         width: 1fr;
         border: round $jtui-border;
-        border-title-color: {C_TEXT}; border-subtitle-color: {C_DIM};
+        border-title-color: $tracker-text; border-subtitle-color: $tracker-dim;
     }}
     #centre:focus-within {{ border: round $jtui-border-focus; }}
 
     #detail {{
         display: none; width: 46%; min-width: 44;
         border: round $jtui-border;
-        border-title-color: $jtui-border-detail; border-subtitle-color: {C_DIM};
+        border-title-color: $jtui-border-detail; border-subtitle-color: $tracker-dim;
     }}
     #detail.open {{ display: block; }}
     #detail:focus-within {{ border: round $jtui-border-detail; }}
@@ -1338,7 +1494,8 @@ class JTUI(App):
         background: transparent; border: none; padding: 0 1;
         scrollbar-size-vertical: 1;
     }}
-    OptionList:focus {{ background: transparent; border: none; }}
+    OptionList:focus {{ background: transparent; background-tint: transparent; border: none; }}
+    OptionList > .option-list--option-disabled {{ text-opacity: 100%; text-style: not dim; }}
     OptionList > .option-list--option-highlighted {{ background: $jtui-cursor; }}
     OptionList:focus > .option-list--option-highlighted {{ background: $jtui-cursor; }}
 
@@ -1363,7 +1520,7 @@ class JTUI(App):
     #d-comments-head {{ padding: 1 1 0 1; }}
     #d-comments {{ height: auto; }}
     .comment {{
-        height: auto; border-left: thick {C_VFAINT};
+        height: auto; border-left: thick $tracker-vfaint;
         padding: 0 1; margin: 1 1 0 1;
     }}
     .comment-meta {{ height: auto; }}
@@ -1375,7 +1532,7 @@ class JTUI(App):
         width: 44; height: auto; max-height: 80%;
         background: $jtui-modal-bg; border: round $jtui-border-focus; padding: 1 1;
     }}
-    #picker-title {{ padding: 0 1 1 1; color: {C_SUB}; text-style: bold; }}
+    #picker-title {{ padding: 0 1 1 1; color: $tracker-sub; text-style: bold; }}
     #picker-list {{ height: auto; max-height: 14; }}
 
     CommentModal {{ align: center middle; background: $jtui-overlay; }}
@@ -1384,7 +1541,7 @@ class JTUI(App):
         width: 46; height: auto; max-height: 80%;
         background: $jtui-modal-bg; border: round $jtui-border-focus; padding: 1 1;
     }}
-    #labels-title {{ padding: 0 1 1 1; color: {C_SUB}; text-style: bold; }}
+    #labels-title {{ padding: 0 1 1 1; color: $tracker-sub; text-style: bold; }}
     #labels-list {{ height: auto; max-height: 14; }}
     #labels-actions {{ height: 3; margin: 1 0 0 0; }}
     #labels-hint {{ width: 1fr; padding: 1 1; }}
@@ -1396,17 +1553,17 @@ class JTUI(App):
         background: $jtui-modal-bg; border: round $jtui-border-focus; padding: 1 2;
     }}
     #projname-title {{ padding: 0 0 1 0; }}
-    #projname-input {{ border: round {C_VFAINT}; background: transparent; }}
-    #projname-input:focus {{ border: round {C_FAINT}; }}
+    #projname-input {{ border: round $tracker-vfaint; background: transparent; }}
+    #projname-input:focus {{ border: round $tracker-faint; }}
     #projname-hint {{ padding: 1 0 0 0; }}
 
     #comment-box {{
         width: 72; height: 20;
         background: $jtui-modal-bg; border: round $jtui-border-focus; padding: 1 2;
     }}
-    #comment-title {{ color: {C_SUB}; text-style: bold; padding: 0 0 1 0; }}
-    #comment-input {{ height: 1fr; border: round {C_VFAINT}; background: transparent; }}
-    #comment-input:focus {{ border: round {C_FAINT}; }}
+    #comment-title {{ color: $tracker-sub; text-style: bold; padding: 0 0 1 0; }}
+    #comment-input {{ height: 1fr; border: round $tracker-vfaint; background: transparent; }}
+    #comment-input:focus {{ border: round $tracker-faint; }}
     #comment-actions {{ height: 3; margin: 1 0 0 0; }}
     #comment-hint {{ width: 1fr; padding: 1 0; }}
     #comment-actions Button {{ margin: 0 0 0 2; min-width: 10; }}
@@ -1416,11 +1573,11 @@ class JTUI(App):
         width: 72; height: 24;
         background: $jtui-modal-bg; border: round $jtui-border-focus; padding: 1 2;
     }}
-    #ticket-heading {{ color: {C_SUB}; text-style: bold; padding: 0 0 1 0; }}
-    #ticket-title {{ border: round {C_VFAINT}; background: transparent; }}
-    #ticket-title:focus {{ border: round {C_FAINT}; }}
-    #ticket-desc {{ height: 1fr; margin: 1 0 0 0; border: round {C_VFAINT}; background: transparent; }}
-    #ticket-desc:focus {{ border: round {C_FAINT}; }}
+    #ticket-heading {{ color: $tracker-sub; text-style: bold; padding: 0 0 1 0; }}
+    #ticket-title {{ border: round $tracker-vfaint; background: transparent; }}
+    #ticket-title:focus {{ border: round $tracker-faint; }}
+    #ticket-desc {{ height: 1fr; margin: 1 0 0 0; border: round $tracker-vfaint; background: transparent; }}
+    #ticket-desc:focus {{ border: round $tracker-faint; }}
     #ticket-actions {{ height: 3; margin: 1 0 0 0; }}
     #ticket-hint {{ width: 1fr; padding: 1 0; }}
     #ticket-actions Button {{ margin: 0 0 0 2; min-width: 10; }}
@@ -1432,8 +1589,8 @@ class JTUI(App):
     }}
     #onboard-title {{ padding: 0 0 1 0; }}
     #onboard-body {{ padding: 0 0 1 0; }}
-    #onboard-key {{ border: round {C_VFAINT}; background: transparent; }}
-    #onboard-key:focus {{ border: round {C_FAINT}; }}
+    #onboard-key {{ border: round $tracker-vfaint; background: transparent; }}
+    #onboard-key:focus {{ border: round $tracker-faint; }}
     #onboard-status {{ height: 1; padding: 0 1; margin: 1 0 0 0; }}
     #onboard-actions {{ height: 3; margin: 1 0 0 0; }}
     #onboard-hint {{ width: 1fr; }}
@@ -1444,7 +1601,7 @@ class JTUI(App):
         width: 40; height: auto; max-height: 85%;
         background: $jtui-modal-bg; border: round $jtui-border-focus; padding: 1 1;
     }}
-    #theme-title {{ padding: 0 1 1 1; color: {C_SUB}; text-style: bold; }}
+    #theme-title {{ padding: 0 1 1 1; color: $tracker-sub; text-style: bold; }}
     #theme-list {{ height: auto; max-height: 18; }}
 
     SettingsModal {{ align: center middle; background: $jtui-overlay; }}
@@ -1506,7 +1663,7 @@ class JTUI(App):
     def _on_theme_changed(self, _theme) -> None:
         # ansi-background themes (clear, ansi-dark, …) need ansi_color mode
         # so default-color codes pass through and the terminal bg shows
-        set_palette(self.theme == "system")
+        set_palette(self.theme)
         self.ansi_color = self._theme_is_ansi()
         if self._boot_data is not None:
             self._render_boot(self._boot_data)
@@ -1569,18 +1726,28 @@ class JTUI(App):
                 yield Static(hint_markup(), id="d-hint")
         yield Footer()
 
+    @work(exclusive=True, group="flume-theme")
+    async def watch_flume_theme(self) -> None:
+        async for theme in watch_flume_theme_changes():
+            if theme in self.available_themes and theme != self.theme:
+                self.theme = theme
+
     def on_mount(self) -> None:
         for t in THEMES:
             self.register_theme(t)
         self.theme_changed_signal.subscribe(self, self._on_theme_changed)
-        saved = load_state().get("theme")
+        saved = active_flume_theme() or load_state().get("theme")
         self.theme = saved if saved in self.available_themes else THEME_NAMES[0]
+        set_palette(self.theme)
         self.ansi_color = self._theme_is_ansi()
+        self.watch_flume_theme()
         layout = load_state()
+        self._sidebar_hidden = bool(layout.get("sidebar_hidden", True))
         if w := layout.get("sidebar_w"):
             self.query_one("#sidebar").styles.width = int(w)
         if w := layout.get("detail_w"):
             self.query_one("#detail").styles.width = int(w)
+        self._apply_sidebar_visibility()
         self.query_one("#teams").border_title = " projects "
         self.query_one("#profile").border_title = " you "
         self.query_one("#centre").border_title = " issues "
@@ -1590,6 +1757,7 @@ class JTUI(App):
         try:
             creds = load_credentials()
         except Exception:
+
             def connected(new_creds: tuple | None) -> None:
                 if not new_creds:
                     return
@@ -1616,8 +1784,7 @@ class JTUI(App):
         team = None
         if boot_cache := read_cache("boot"):
             self._render_boot(boot_cache)
-            last_id = load_state().get("team_id")
-            team = next((t for t in self._teams if t["id"] == last_id), None)
+            team = preferred_tracker_scope(self._teams)
         if team is not None:
             self.query_one("#teams", NavList).highlighted = self._teams.index(team)
             self.load_team(team)
@@ -1683,7 +1850,7 @@ class JTUI(App):
         teams_list.clear_options()
         for t in self._teams:
             row = Text()
-            row.append("● ", style=t.get("color") or C_BLUE)
+            row.append("● ", style=tracker_role_color("team", C_BLUE))
             row.append(t["name"], style=C_TEXT)
             row.append(f"  {t['key']}", style=C_DIM)
             teams_list.add_option(Option(row, id=t["id"]))
@@ -1738,16 +1905,33 @@ class JTUI(App):
         write_cache("boot", data)
         if not pick_team:
             return
-        last = load_state().get("team_id")
-        team = next((t for t in self._teams if t["id"] == last), None) or (
-            self._teams[0] if self._teams else None
-        )
+        team = preferred_tracker_scope(self._teams)
         if team is None:
-            issues_list.loading = False
-            self.notify("no projects found", severity="warning")
+            if not self._teams:
+                issues_list.loading = False
+                self.notify("no projects found", severity="warning")
+                return
+            self._sidebar_hidden = False
+            self._apply_sidebar_visibility()
+            self.query_one("#teams", NavList).focus()
             return
         self.query_one("#teams", NavList).highlighted = self._teams.index(team)
         self.load_team(team)
+
+    def _apply_sidebar_visibility(self) -> None:
+        display = "none" if self._sidebar_hidden else "block"
+        self.query_one("#sidebar").styles.display = display
+        self.query_one("#split-left").styles.display = display
+        if self._sidebar_hidden and getattr(self.focused, "id", None) in {
+            "teams",
+            "profile",
+        }:
+            self.query_one("#issues", NavList).focus()
+
+    def action_toggle_sidebar(self) -> None:
+        self._sidebar_hidden = not self._sidebar_hidden
+        self._apply_sidebar_visibility()
+        self._save_state()
 
     def _save_layout(self, reset: str | None = None) -> None:
         data = load_state()
@@ -1769,6 +1953,7 @@ class JTUI(App):
         data["mine"] = self._mine
         data["theme"] = self.theme
         data["group_by"] = self._group_by
+        data["sidebar_hidden"] = self._sidebar_hidden
         save_state(data)
 
     def _write_team_cache(self) -> None:
@@ -1842,8 +2027,7 @@ class JTUI(App):
         if isinstance(self.screen, ModalScreen):
             return
         if any(
-            w.group == "mutate" and w.state == WorkerState.RUNNING
-            for w in self.workers
+            w.group == "mutate" and w.state == WorkerState.RUNNING for w in self.workers
         ):
             return
         self.load_team(self._team)
@@ -1909,8 +2093,7 @@ class JTUI(App):
         children = (data["issue"].get("children") or {}).get("nodes") or []
         if children:
             done = sum(
-                1 for ch in children
-                if ch["state"]["type"] in ("completed", "canceled")
+                1 for ch in children if ch["state"]["type"] in ("completed", "canceled")
             )
             chead = Text("\uf0e8 ", style=C_MAUVE)
             chead.append(f"sub-issues · {done}/{len(children)}", style=f"bold {C_SUB}")
@@ -1918,7 +2101,7 @@ class JTUI(App):
             for ch in children:
                 st = ch["state"]
                 row = Text(no_wrap=True, overflow="ellipsis")
-                row.append(f"{state_icon(st)} ", style=st["color"] or C_SUB)
+                row.append(f"{state_icon(st)} ", style=tracker_state_color(st))
                 row.append(ch["identifier"], style=C_DIM)
                 c_title = ch["title"]
                 if len(c_title) > 60:
@@ -1936,9 +2119,11 @@ class JTUI(App):
             await box.mount(Static(Text("   nothing here yet", style=C_DIM)))
             return
         for c in comments:
-            author = (c.get("user") or {}).get("displayName") or (
-                c.get("botActor") or {}
-            ).get("name") or "unknown"
+            author = (
+                (c.get("user") or {}).get("displayName")
+                or (c.get("botActor") or {}).get("name")
+                or "unknown"
+            )
             meta = Text()
             meta.append("● ", style=C_MAUVE)
             meta.append(author, style=f"bold {C_TEXT}")
@@ -1951,9 +2136,7 @@ class JTUI(App):
     @work(exclusive=True, group="members")
     async def pick_transition(self, issue: dict) -> None:
         try:
-            data = await self.api(
-                "GET", f"/rest/api/2/issue/{issue['id']}/transitions"
-            )
+            data = await self.api("GET", f"/rest/api/2/issue/{issue['id']}/transitions")
         except Exception as e:
             self.notify(f"jira: {e}", severity="error")
             return
@@ -1966,7 +2149,7 @@ class JTUI(App):
         for t in transitions:
             to_state = normalize_state(t.get("to") or {})
             row = Text()
-            row.append(f"{state_icon(to_state)} ", style=to_state["color"])
+            row.append(f"{state_icon(to_state)} ", style=tracker_state_color(to_state))
             row.append(t.get("name", "?"), style=C_TEXT)
             if to_state["name"] != t.get("name"):
                 row.append(f"  \u2192 {to_state['name']}", style=C_DIM)
@@ -2062,9 +2245,7 @@ class JTUI(App):
                 # workspace may not have a "Task" type — use the first
                 # non-subtask type the project offers and retry once
                 proj = await self.api("GET", f"/rest/api/2/project/{team['id']}")
-                types = [
-                    t for t in proj.get("issueTypes", []) if not t.get("subtask")
-                ]
+                types = [t for t in proj.get("issueTypes", []) if not t.get("subtask")]
                 if not types:
                     raise
                 fields["issuetype"] = {"name": types[0]["name"]}
@@ -2105,16 +2286,9 @@ class JTUI(App):
             self.load_comments(issue)
 
     # ── rendering ─────────────────────────────────────────────────────
-    def render_issues(self, keep: str | None = None) -> None:
-        ol = self.query_one("#issues", NavList)
-        if keep is None:
-            prev = ol.highlighted
-            if prev is not None:
-                opt = ol.get_option_at_index(prev)
-                keep = opt.id if opt else None
-
-        width = max(ol.content_size.width - 2, 40)
-        flt = self._filter.lower()
+    def _visible_issues(self) -> list[dict]:
+        """Apply view filters without changing the cached issue records."""
+        filter_text = self._filter.lower()
         issues = self._issues
         if self._mine and self._viewer_id:
             issues = [
@@ -2128,23 +2302,29 @@ class JTUI(App):
                 for i in issues
                 if (i.get("project") or {}).get("id", "") == self._project_filter
             ]
-        if flt:
+        if filter_text:
             issues = [
-                i
-                for i in issues
-                if flt
+                issue
+                for issue in issues
+                if filter_text
                 in (
-                    i["title"]
+                    issue["title"]
                     + " "
-                    + i["identifier"]
+                    + issue["identifier"]
                     + " "
-                    + ((i.get("assignee") or {}).get("displayName") or "")
+                    + ((issue.get("assignee") or {}).get("displayName") or "")
                 ).lower()
             ]
+        return issues
 
-        def mine_first(i: dict):
-            is_mine = (i.get("assignee") or {}).get("id") == self._viewer_id
-            return (0 if is_mine else 1, *issue_sort_key(i))
+    def _issue_groups(
+        self, issues: list[dict], width: int
+    ) -> list[tuple[Text, list[dict]]]:
+        """Build headers and ordered groups before replacing the displayed rows."""
+
+        def mine_first(issue: dict):
+            is_mine = (issue.get("assignee") or {}).get("id") == self._viewer_id
+            return (0 if is_mine else 1, *issue_sort_key(issue))
 
         if self._group_by == "project":
             # group by project; inside a project keep the status order,
@@ -2160,11 +2340,15 @@ class JTUI(App):
                 proj_of.values(),
                 key=lambda p: (p["id"] == "", -len(by_proj[p["id"]])),
             )
+
             def in_group_key(i: dict):
                 return (state_sort_key(i["state"]), *mine_first(i))
+
             groups = [
-                (self._project_header_row(p, len(by_proj[p["id"]]), width),
-                 sorted(by_proj[p["id"]], key=in_group_key))
+                (
+                    self._project_header_row(p, len(by_proj[p["id"]]), width),
+                    sorted(by_proj[p["id"]], key=in_group_key),
+                )
                 for p in ordered_groups
             ]
         else:
@@ -2176,13 +2360,28 @@ class JTUI(App):
                 state_of[sid] = i["state"]
             ordered_states = sorted(state_of.values(), key=state_sort_key)
             groups = [
-                (self._header_row(st, len(by_state[st["id"]]), width),
-                 sorted(by_state[st["id"]], key=mine_first))
+                (
+                    self._header_row(st, len(by_state[st["id"]]), width),
+                    sorted(by_state[st["id"]], key=mine_first),
+                )
                 for st in ordered_states
             ]
+        return groups
+
+    def render_issues(self, keep: str | None = None) -> None:
+        issues_list = self.query_one("#issues", NavList)
+        if keep is None:
+            previous_index = issues_list.highlighted
+            if previous_index is not None:
+                previous_option = issues_list.get_option_at_index(previous_index)
+                keep = previous_option.id if previous_option else None
+
+        width = max(issues_list.content_size.width - 2, 40)
+        issues = self._visible_issues()
+        groups = self._issue_groups(issues, width)
 
         id_w = max((len(i["identifier"]) for i in issues), default=6)
-        ol.clear_options()
+        issues_list.clear_options()
         self._opt_index = {}
         self._header_indices = []
         opts: list[Option] = []
@@ -2197,31 +2396,38 @@ class JTUI(App):
                 self._opt_index[i["id"]] = len(opts)
                 opts.append(Option(self._issue_row(i, width, id_w), id=i["id"]))
         if not opts:
-            msg = "no matches" if flt else "no issues"
+            msg = "no matches" if self._filter.lower() else "no issues"
             opts.append(Option(Text(f"  {msg}", style=C_DIM), disabled=True))
-        ol.add_options(opts)
+        issues_list.add_options(opts)
 
         # a group's first issue sits right after its header row
         self._group_starts = [h + 1 for h in self._header_indices]
         mine_tag = " \uf007 mine \u00b7" if self._mine else ""
         proj_tag = ""
         if self._project_filter is not None:
-            pname = next(
-                ((i.get("project") or {}).get("name") for i in self._issues
-                 if (i.get("project") or {}).get("id", "") == self._project_filter),
-                "no epic",
-            ) or "no epic"
+            pname = (
+                next(
+                    (
+                        (i.get("project") or {}).get("name")
+                        for i in self._issues
+                        if (i.get("project") or {}).get("id", "")
+                        == self._project_filter
+                    ),
+                    "no epic",
+                )
+                or "no epic"
+            )
             proj_tag = f" \uf07b {pname} \u00b7"
-        self.query_one("#centre").border_subtitle = (
-            f"{mine_tag}{proj_tag} {len(issues)} issues "
-        )
+        self.query_one(
+            "#centre"
+        ).border_subtitle = f"{mine_tag}{proj_tag} {len(issues)} issues "
         if keep and keep in self._opt_index:
-            ol.highlighted = self._opt_index[keep]
+            issues_list.highlighted = self._opt_index[keep]
         elif self._opt_index:
-            ol.highlighted = min(self._opt_index.values())
+            issues_list.highlighted = min(self._opt_index.values())
 
     def _header_row(self, state: dict, count: int, width: int) -> Text:
-        color = state["color"] or C_SUB
+        color = tracker_state_color(state)
         t = Text(no_wrap=True, overflow="ellipsis")
         t.append(f"{state_icon(state)} ", style=color)
         t.append(state["name"], style=f"bold {color}")
@@ -2232,7 +2438,7 @@ class JTUI(App):
         return t
 
     def _project_header_row(self, project: dict, count: int, width: int) -> Text:
-        color = project.get("color") or C_DIM
+        color = tracker_role_color("project", C_DIM)
         t = Text(no_wrap=True, overflow="ellipsis")
         t.append("\uf07b ", style=color)
         t.append(project["name"], style=f"bold {color}")
@@ -2245,7 +2451,7 @@ class JTUI(App):
     def _issue_row(self, issue: dict, width: int, id_w: int) -> Text:
         st = issue["state"]
         t = Text(no_wrap=True, overflow="ellipsis")
-        t.append(f"{state_icon(st)} ", style=st["color"] or C_SUB)
+        t.append(f"{state_icon(st)} ", style=tracker_state_color(st))
         t.append(issue["identifier"].ljust(id_w), style=C_DIM)
         t.append(" ")
 
@@ -2256,9 +2462,13 @@ class JTUI(App):
         blocked_by, blocks = block_info(issue)
         badges = []
         if blocked_by:
-            badges.append((" \uf056", C_RED))  # blocked by something
+            badges.append(
+                (" \uf056", tracker_role_color("blocked", C_RED))
+            )  # blocked by something
         if blocks:
-            badges.append((" \uf06a", C_PEACH))  # blocking something
+            badges.append(
+                (" \uf06a", tracker_role_color("blocking", C_PEACH))
+            )  # blocking something
 
         right_w = 3 + 2 + 10 + 2 + 4  # prio, gap, assignee, gap, time
         title_w = width - 2 - id_w - 1 - right_w - 1
@@ -2271,7 +2481,7 @@ class JTUI(App):
         for badge, color in badges:
             t.append(badge, style=color)
         for lb in labels:
-            t.append(" ●", style=lb["color"] or C_DIM)
+            t.append(" ●", style=tracker_role_color("label", C_DIM))
         pad = title_w - len(title) - dots_w
         if pad > 0:
             t.append(" " * pad)
@@ -2314,8 +2524,8 @@ class JTUI(App):
     def _update_detail_meta(self, issue: dict) -> None:
         st = issue["state"]
         m = Text()
-        m.append(f"{state_icon(st)} ", style=st["color"] or C_SUB)
-        m.append(st["name"], style=f"bold {st['color'] or C_SUB}")
+        m.append(f"{state_icon(st)} ", style=tracker_state_color(st))
+        m.append(st["name"], style=f"bold {tracker_state_color(st)}")
         m.append("   ")
         m.append_text(priority_cell(issue["priority"]))
         m.append(f" {priority_name(issue['priority'])}", style=C_SUB)
@@ -2326,25 +2536,27 @@ class JTUI(App):
         project = issue.get("project")
         if project:
             m.append("   ")
-            m.append("\uf07b ", style=project.get("color") or C_DIM)
+            m.append("\uf07b ", style=tracker_role_color("project", C_DIM))
             m.append(project["name"], style=C_SUB)
         labels = issue["labels"]["nodes"]
         if labels:
             m.append("\n")
             for lb in labels:
-                m.append(" ", style=lb["color"] or C_DIM)
+                m.append(" ", style=tracker_role_color("label", C_DIM))
                 m.append(f"{lb['name']}  ", style=C_SUB)
         blocked_by, blocks = block_info(issue)
         if blocked_by or blocks:
             m.append("\n")
             if blocked_by:
-                m.append("\uf056 ", style=C_RED)
-                m.append("blocked by " + " \u00b7 ".join(blocked_by), style=C_RED)
+                color = tracker_role_color("blocked", C_RED)
+                m.append("\uf056 ", style=color)
+                m.append("blocked by " + " \u00b7 ".join(blocked_by), style=color)
             if blocked_by and blocks:
                 m.append("   ")
             if blocks:
-                m.append("\uf06a ", style=C_PEACH)
-                m.append("blocks " + " \u00b7 ".join(blocks), style=C_PEACH)
+                color = tracker_role_color("blocking", C_PEACH)
+                m.append("\uf06a ", style=color)
+                m.append("blocks " + " \u00b7 ".join(blocks), style=color)
         m.append("\n")
         m.append(" ", style=C_DIM)
         m.append(
@@ -2424,9 +2636,9 @@ class JTUI(App):
             self._spin_frame = (self._spin_frame + 1) % len(SPINNER_FRAMES)
             frame = SPINNER_FRAMES[self._spin_frame]
             try:
-                self.query_one("#centre").border_subtitle = (
-                    f" {len(self._issues)} \u00b7 {frame} refreshing "
-                )
+                self.query_one(
+                    "#centre"
+                ).border_subtitle = f" {len(self._issues)} \u00b7 {frame} refreshing "
             except Exception:
                 pass
 
@@ -2504,9 +2716,11 @@ class JTUI(App):
         if self._project_filter is None:
             row.append("  \uf00c", style=C_GREEN)
         opts.append(Option(row, id="all:"))
-        for pid, p in sorted(projects.items(), key=lambda x: (x[0] == "", -counts[x[0]])):
+        for pid, p in sorted(
+            projects.items(), key=lambda x: (x[0] == "", -counts[x[0]])
+        ):
             row = Text()
-            row.append("\uf07b ", style=p.get("color") or C_DIM)
+            row.append("\uf07b ", style=tracker_role_color("project", C_DIM))
             row.append(p["name"], style=C_TEXT)
             row.append(f"  {counts[pid]}", style=C_DIM)
             if self._project_filter == pid:
@@ -2549,7 +2763,7 @@ class JTUI(App):
         fid = self.focused.id if self.focused else None
         if fid == "d-scroll":
             self.query_one("#issues", NavList).focus()
-        elif fid == "issues":
+        elif fid == "issues" and not self._sidebar_hidden:
             self.query_one("#teams", NavList).focus()
 
     def action_focus_right(self) -> None:
@@ -2624,7 +2838,9 @@ class JTUI(App):
         current = {lb["name"] for lb in issue["labels"]["nodes"]}
         names = sorted(set(names) | current)
         if not names:
-            self.notify("no labels here yet — add one in Jira first", severity="warning")
+            self.notify(
+                "no labels here yet — add one in Jira first", severity="warning"
+            )
             return
         labels = [{"id": n, "name": n, "color": label_color(n)} for n in names]
 
@@ -2710,7 +2926,7 @@ class JTUI(App):
         opts.append(Option(row, id="none:"))
         for p in epics:
             row = Text(no_wrap=True, overflow="ellipsis")
-            row.append("\uf07b ", style=p.get("color") or C_DIM)
+            row.append("\uf07b ", style=tracker_role_color("project", C_DIM))
             row.append(p["name"], style=C_TEXT)
             if p["id"] == current:
                 row.append("  \uf00c", style=C_GREEN)
@@ -2720,9 +2936,11 @@ class JTUI(App):
             if choice is None:
                 return
             if choice == "new:":
+
                 def named(name: str | None) -> None:
                     if name:
                         self.create_project_and_assign(issue, name)
+
                 self.push_screen(ProjectNameModal(), named)
             elif choice == "none:":
                 if current is not None:

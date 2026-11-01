@@ -58,24 +58,25 @@ THEMES = {
 
 
 def fetch_star_dates() -> list[datetime]:
-    dates, page = [], 1
+    dates: list[datetime] = []
+    page = 1
     while True:
-        req = urllib.request.Request(
-            f"https://api.github.com/repos/{REPO}/stargazers"
-            f"?per_page=100&page={page}",
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{REPO}/stargazers?per_page=100&page={page}",
             headers={
                 "Accept": "application/vnd.github.star+json",
                 "X-GitHub-Api-Version": "2022-11-28",
                 **({"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}),
             },
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            batch = json.load(resp)
+        with urllib.request.urlopen(request, timeout=30) as response:
+            batch = json.load(response)
+
         if not batch:
             break
         dates += [
-            datetime.fromisoformat(s["starred_at"].replace("Z", "+00:00"))
-            for s in batch
+            datetime.fromisoformat(stargazer["starred_at"].replace("Z", "+00:00"))
+            for stargazer in batch
         ]
         if len(batch) < 100:
             break
@@ -92,7 +93,7 @@ def nice_ceiling(n: int) -> int:
     return n
 
 
-def render(dates: list[datetime], theme: dict) -> str:
+def render(dates: list[datetime], theme: dict[str, str]) -> str:
     now = datetime.now(timezone.utc)
     total = len(dates)
     t0, t1 = dates[0], now
@@ -166,14 +167,21 @@ def stale(dates: list[datetime]) -> bool:
     if not all((OUT_DIR / f"star-history-{n}.svg").exists() for n in THEMES):
         return True
     try:
-        old = (OUT_DIR / "star-history-dark.svg").read_text()
-        count = int(re.search(r"&#9733; (\d+)<", old)[1])
-        drawn = datetime.strptime(
-            re.search(r"updated (\d{4}-\d{2}-\d{2})<", old)[1], "%Y-%m-%d"
-        ).replace(tzinfo=timezone.utc)
+        previous_chart = (OUT_DIR / "star-history-dark.svg").read_text()
+        count_match = re.search(r"&#9733; (\d+)<", previous_chart)
+        date_match = re.search(r"updated (\d{4}-\d{2}-\d{2})<", previous_chart)
+        if count_match is None or date_match is None:
+            return True
+
+        previous_count = int(count_match[1])
+        drawn = datetime.strptime(date_match[1], "%Y-%m-%d").replace(
+            tzinfo=timezone.utc
+        )
     except Exception:
         return True
-    return count != len(dates) or (datetime.now(timezone.utc) - drawn).days >= 7
+
+    chart_age_days = (datetime.now(timezone.utc) - drawn).days
+    return previous_count != len(dates) or chart_age_days >= 7
 
 
 def main() -> None:
@@ -184,11 +192,12 @@ def main() -> None:
     if not stale(dates):
         print(f"chart already current ({len(dates)} stars) — skipping")
         return
+
     OUT_DIR.mkdir(exist_ok=True)
     for name, theme in THEMES.items():
-        out = OUT_DIR / f"star-history-{name}.svg"
-        out.write_text(render(dates, theme))
-        print(f"wrote {out} ({len(dates)} stars)")
+        output_path = OUT_DIR / f"star-history-{name}.svg"
+        output_path.write_text(render(dates, theme))
+        print(f"wrote {output_path} ({len(dates)} stars)")
 
 
 if __name__ == "__main__":
